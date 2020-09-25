@@ -1,3 +1,3 @@
-module github.com/mallekoppie/goslow
+module github.com/Mallekoppie/goslow
 
 go 1.15
