@@ -1,0 +1,16 @@
+platform:
+  loglevel: info
+  http:
+    listeningaddress: 0.0.0.0:9111
+    tlscertfilename: ""
+    tlskeyfilename: ""
+    tlsenabled: false
+  auth:
+    oauthenabled: false
+    idpwellknownurl: ""
+    owntokens:
+      clientid: ""
+      clientsecret: ""
+  component:
+    componentname: Unit Test
+    componentconfigfilename: serviceconfigfile.hcl
