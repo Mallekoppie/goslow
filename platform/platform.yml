@@ -1,18 +1,51 @@
 platform:
-  loglevel: info
+  log:
+    loglevel: info
+    logfilepath: ""
   http:
     server:
       listeningaddress: 0.0.0.0:9111
       tlscertfilename: ""
       tlskeyfilename: ""
       tlsenabled: false
-    clients: []
+    clients:
+    - id: default
+      tlsverify: false
+      maxidleconnections: 10
+      requesttimeout: 10
+    - id: custom
+      tlsverify: false
+      maxidleconnections: 10
+      requesttimeout: 10
   auth:
-    oauthenabled: false
-    idpwellknownurl: ""
-    owntokens:
-      clientid: ""
-      clientsecret: ""
+    server:
+      oauth:
+        enabled: false
+        idpwellknownurl: ""
+        clientid: ""
+        allowedalgorithms:
+        - rs256
+        - rs384
+      basic:
+        enabled: false
+        allowedusers:
+          user1: pass1
+          user2: pass2
+    client:
+      oauth:
+        owntokens:
+        - id: default
+          idpwellknownurl: ""
+          clientid: test client ID
+          clientsecret: some secret
+          username: test username
+          password: testpassword
+        - id: exsternalApi
+          idpwellknownurl: ""
+          clientid: remoteClientID
+          clientsecret: remote secret
+          username: test username
+          password: testpassword
   component:
     componentname: Unit Test
     componentconfigfilename: serviceconfigfile.hcl

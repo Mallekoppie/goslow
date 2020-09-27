@@ -43,7 +43,10 @@ func readPlatformConfiguration() (Config, error) {
 
 // Config ... Platform configuration
 type Config struct {
-	LogLevel string
+	Log struct {
+		LogLevel    string
+		LogFilePath string
+	}
 
 	HTTP struct {
 		Server struct {
@@ -57,12 +60,24 @@ type Config struct {
 	}
 
 	Auth struct {
-		OAuthEnabled    bool
-		IdpWellKnownURL string
+		Server struct {
+			OAuth struct {
+				Enabled           bool
+				IdpWellKnownURL   string
+				ClientID          string
+				AllowedAlgorithms []string
+			}
 
-		OwnTokens struct {
-			ClientID     string
-			ClientSecret string
+			Basic struct {
+				Enabled      bool
+				AllowedUsers map[string]string
+			}
+		}
+
+		Client struct {
+			OAuth struct {
+				OwnTokens []OwnTokenConfig
+			}
 		}
 	}
 
@@ -74,6 +89,18 @@ type Config struct {
 
 // HTTPClientConfig ... For HTTP client configuration
 type HTTPClientConfig struct {
-	ID        string
-	TLSVerify bool
+	ID                 string
+	TLSVerify          bool
+	MaxIdleConnections int
+	RequestTimeout     int
+}
+
+// OwnTokenConfig ... Will need to secure the credentials in the future
+type OwnTokenConfig struct {
+	ID              string
+	IdpWellKnownURL string
+	ClientID        string
+	ClientSecret    string
+	Username        string
+	Password        string
 }
