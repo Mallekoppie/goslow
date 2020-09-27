@@ -32,7 +32,6 @@ func readPlatformConfiguration() (Config, error) {
 		return config, err
 	}
 	err = viper.UnmarshalKey("platform", &config)
-	// err := viper.Unmarshal(&config)
 	if err != nil {
 		log.Println("Error reading config: ", err.Error())
 		return config, err

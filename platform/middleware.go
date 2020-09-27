@@ -1,4 +1,4 @@
-package middleware
+package platform
 
 import (
 	"context"
@@ -6,15 +6,25 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc"
 )
 
-type CustomClaims struct {
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Do stuff here
+		log.Println(r.RequestURI)
+		// Call the next handler, which can be another middleware in the chain, or the final handler.
+		next.ServeHTTP(w, r)
+	})
+}
+
+type customClaims struct {
 	Roles []string `json:"roles,omitempty"`
 }
 
-func UseOAuth2(inner http.Handler, roles []string) http.Handler {
+func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 
 	ctx := context.Background()
 	provider, err := oidc.NewProvider(ctx, "http://localhost:8180/auth/realms/golang") // this is bad
@@ -54,7 +64,7 @@ func UseOAuth2(inner http.Handler, roles []string) http.Handler {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-			claims := CustomClaims{}
+			claims := customClaims{}
 			err = idToken.Claims(&claims)
 			if err != nil {
 				log.Println("Unable to get claims: ", err.Error())
@@ -87,5 +97,44 @@ func UseOAuth2(inner http.Handler, roles []string) http.Handler {
 		}
 
 		r.Header.Del("X-Token-Roles")
+	})
+}
+
+func serviceMethodSlaMiddleware(inner http.Handler, sla int64) http.Handler {
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		start := time.Now()
+		inner.ServeHTTP(w, r)
+		difference := time.Since(start).Milliseconds()
+
+		if difference > sla {
+			log.Printf("Sla of %v ms was exceeded. Actual execution time: %v ms", sla, difference)
+		} else {
+			log.Printf("Sla of %v ms was met successfully. Actual execution time: %v ms", sla, difference)
+		}
+
+	})
+}
+
+func allowedContentTypeMiddleware(inner http.Handler, contentTypeConfig string) http.Handler {
+
+	contentType := strings.ToLower(contentTypeConfig)
+	enabled := len(contentTypeConfig) > 0
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		if enabled {
+			result := r.Header.Get("Content-Type")
+
+			if strings.ToLower(result) == contentType {
+				inner.ServeHTTP(w, r)
+			} else {
+				log.Println("Media type not allowed: ", result)
+				w.WriteHeader(http.StatusUnsupportedMediaType)
+			}
+		} else {
+			inner.ServeHTTP(w, r)
+		}
 	})
 }
