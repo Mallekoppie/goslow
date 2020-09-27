@@ -12,7 +12,7 @@ func init() {
 	viper.SetConfigName("platform")
 }
 
-func writePlatformConfiguration(config PlatformConfig) error {
+func writePlatformConfiguration(config Config) error {
 	viper.Set("platform", config)
 
 	err := viper.WriteConfig()
@@ -24,8 +24,8 @@ func writePlatformConfiguration(config PlatformConfig) error {
 	return nil
 }
 
-func readPlatformConfiguration() (PlatformConfig, error) {
-	var config PlatformConfig
+func readPlatformConfiguration() (Config, error) {
+	var config Config
 	err := viper.ReadInConfig()
 	if err != nil {
 		log.Println("Unable to read config file: ", err.Error())
@@ -41,22 +41,27 @@ func readPlatformConfiguration() (PlatformConfig, error) {
 	return config, nil
 }
 
-type PlatformConfig struct {
+// Config ... Platform configuration
+type Config struct {
 	LogLevel string
 
-	Http struct {
-		ListeningAddress string
-		TlsCertFileName  string
-		TlsKeyFileName   string
-		TlsEnabled       bool
+	HTTP struct {
+		Server struct {
+			ListeningAddress string
+			TLSCertFileName  string
+			TLSKeyFileName   string
+			TLSEnabled       bool
+		}
+
+		Clients []HTTPClientConfig
 	}
 
 	Auth struct {
 		OAuthEnabled    bool
-		IdpWellKnownUrl string
+		IdpWellKnownURL string
 
 		OwnTokens struct {
-			ClientId     string
+			ClientID     string
 			ClientSecret string
 		}
 	}
@@ -65,4 +70,10 @@ type PlatformConfig struct {
 		ComponentName           string
 		ComponentConfigFileName string
 	}
+}
+
+// HTTPClientConfig ... For HTTP client configuration
+type HTTPClientConfig struct {
+	ID        string
+	TLSVerify bool
 }

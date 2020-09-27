@@ -1,10 +1,12 @@
 platform:
   loglevel: info
   http:
-    listeningaddress: 0.0.0.0:9111
-    tlscertfilename: ""
-    tlskeyfilename: ""
-    tlsenabled: false
+    server:
+      listeningaddress: 0.0.0.0:9111
+      tlscertfilename: ""
+      tlskeyfilename: ""
+      tlsenabled: false
+    clients: []
   auth:
     oauthenabled: false
     idpwellknownurl: ""
