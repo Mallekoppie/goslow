@@ -11,6 +11,8 @@ import (
 	"github.com/coreos/go-oidc"
 )
 
+// TODO: Use the zap logger and not log
+
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Do stuff here
@@ -27,11 +29,13 @@ type customClaims struct {
 func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 
 	ctx := context.Background()
+	// TODO: Get from config
 	provider, err := oidc.NewProvider(ctx, "http://localhost:8180/auth/realms/golang") // this is bad
 	if err != nil {
 		panic(err)
 	}
 
+	// TODO: Get from config
 	oidcConfig := &oidc.Config{
 		ClientID: "gotutorial", // this is bad
 	}
@@ -88,6 +92,7 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 				return
 			}
 
+			// TODO: Expand this with scopes
 			r.Header.Add("X-Token-Roles", injectRoles)
 		}
 

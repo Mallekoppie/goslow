@@ -2,14 +2,20 @@ package platform
 
 import (
 	"log"
+	"sync"
 
 	"github.com/spf13/viper"
+)
+
+var (
+	config *Config
+	mutex  sync.Mutex
 )
 
 func init() {
 	viper.SetConfigType("yml")
 	viper.AddConfigPath(".")
-	viper.SetConfigName("platform")
+	viper.SetConfigName("config")
 }
 
 func writePlatformConfiguration(config Config) error {
@@ -25,19 +31,25 @@ func writePlatformConfiguration(config Config) error {
 }
 
 func readPlatformConfiguration() (Config, error) {
-	var config Config
-	err := viper.ReadInConfig()
-	if err != nil {
-		log.Println("Unable to read config file: ", err.Error())
-		return config, err
-	}
-	err = viper.UnmarshalKey("platform", &config)
-	if err != nil {
-		log.Println("Error reading config: ", err.Error())
-		return config, err
+
+	if config == nil {
+		mutex.Lock()
+		if config == nil {
+			err := viper.ReadInConfig()
+			if err != nil {
+				log.Println("Unable to read config file: ", err.Error())
+				return *config, err
+			}
+			err = viper.UnmarshalKey("platform", &config)
+			if err != nil {
+				log.Println("Error reading config: ", err.Error())
+				return *config, err
+			}
+		}
+		mutex.Unlock()
 	}
 
-	return config, nil
+	return *config, nil
 }
 
 // Config ... Platform configuration
