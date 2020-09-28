@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	config                   *Config
+	internalConfig           *config
 	mutex                    sync.Mutex
 	ErrInvalidConfigFilePath = errors.New("Invalid config file path for settings platform.log.logfilepath")
 )
@@ -20,8 +20,8 @@ func init() {
 	viper.SetConfigName("config")
 }
 
-func writePlatformConfiguration(config Config) error {
-	viper.Set("platform", config)
+func writePlatformConfiguration(conf config) error {
+	viper.Set("platform", conf)
 
 	err := viper.WriteConfig()
 	if err != nil {
@@ -32,37 +32,37 @@ func writePlatformConfiguration(config Config) error {
 	return nil
 }
 
-func getPlatformConfiguration() (*Config, error) {
+func getPlatformConfiguration() (*config, error) {
 
-	if config == nil {
+	if internalConfig == nil {
 		mutex.Lock()
-		if config == nil {
+		if internalConfig == nil {
 			err := viper.ReadInConfig()
 			if err != nil {
 				log.Println("Unable to read config file: ", err.Error())
-				return config, err
+				return internalConfig, err
 			}
-			err = viper.UnmarshalKey("platform", &config)
+			err = viper.UnmarshalKey("platform", &internalConfig)
 			if err != nil {
 				log.Println("Error reading config: ", err.Error())
-				return config, err
+				return internalConfig, err
 			}
 		}
 
-		err := config.checkPlatformConfiguration()
+		err := internalConfig.checkPlatformConfiguration()
 		if err != nil {
 			log.Println("Config file incorrect: ", err.Error())
-			return config, err
+			return internalConfig, err
 		}
 
 		mutex.Unlock()
 	}
 
-	return config, nil
+	return internalConfig, nil
 }
 
 // Config ... Platform configuration
-type Config struct {
+type config struct {
 	Log struct {
 		Level    string
 		FilePath string
@@ -76,7 +76,7 @@ type Config struct {
 			TLSEnabled       bool
 		}
 
-		Clients []HTTPClientConfig
+		Clients []httpClientConfig
 	}
 
 	Auth struct {
@@ -96,7 +96,7 @@ type Config struct {
 
 		Client struct {
 			OAuth struct {
-				OwnTokens []OwnTokenConfig
+				OwnTokens []ownTokenConfig
 			}
 		}
 	}
@@ -107,7 +107,7 @@ type Config struct {
 }
 
 // HTTPClientConfig ... For HTTP client configuration
-type HTTPClientConfig struct {
+type httpClientConfig struct {
 	ID                 string
 	TLSVerify          bool
 	MaxIdleConnections int
@@ -115,7 +115,7 @@ type HTTPClientConfig struct {
 }
 
 // OwnTokenConfig ... Will need to secure the credentials in the future
-type OwnTokenConfig struct {
+type ownTokenConfig struct {
 	ID              string
 	IdpWellKnownURL string
 	ClientID        string
@@ -124,7 +124,7 @@ type OwnTokenConfig struct {
 	Password        string
 }
 
-func (conf *Config) checkPlatformConfiguration() error {
+func (conf *config) checkPlatformConfiguration() error {
 	if len(conf.Log.FilePath) < 1 {
 		return ErrInvalidConfigFilePath
 	}
