@@ -1,16 +1,16 @@
 package platform
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"go.uber.org/zap"
 )
 
 func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 	router := mux.NewRouter().StrictSlash(true)
 
-	conf, err := readPlatformConfiguration()
+	conf, err := getPlatformConfiguration()
 	if err != nil {
 		return nil, err
 	}
@@ -25,7 +25,7 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 		// handler = middleware.AllowCors(handler)
 
 		// TODO: Check if enabled before adding these
-		handler = serviceMethodSlaMiddleware(handler, route.SlaMs)
+		handler = loggingMiddleware(handler, route.SlaMs)
 		if conf.Auth.Server.OAuth.Enabled {
 			handler = oAuth2Middleware(handler, route.RolesRequired) // Disabled during development
 		}
@@ -37,32 +37,31 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 
 	}
 
-	router.Use(loggingMiddleware)
-
 	return router, nil
 }
 
 func StartHttpServer(routes Routes) {
-	config, err := readPlatformConfiguration()
+	config, err := getPlatformConfiguration()
 	if err != nil {
-		log.Println("Error reading configuration: ", err.Error())
+		Logger.Error("Error reading platform configuration", zap.Error(err))
+		return
 	}
 
 	router, err := newRouter(routes)
 	if err != nil {
-		log.Fatalln("Error starting HTTP server: ", err.Error())
+		Logger.Fatal("Error starting HTTP server", zap.Error(err))
 		return
 	}
 
 	if config.HTTP.Server.TLSEnabled {
-		log.Println("TLS Server stopped: ",
+		Logger.Error("TLS Server stopped: ", zap.Error(
 			http.ListenAndServeTLS(config.HTTP.Server.ListeningAddress,
 				config.HTTP.Server.TLSCertFileName,
 				config.HTTP.Server.TLSKeyFileName,
-				router))
+				router)))
 	} else {
-		log.Println("HTTP Server stopped: ",
-			http.ListenAndServe(config.HTTP.Server.ListeningAddress, router))
+		Logger.Error("HTTP Server stopped: ", zap.Error(
+			http.ListenAndServe(config.HTTP.Server.ListeningAddress, router)))
 	}
 }
 

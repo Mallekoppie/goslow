@@ -7,9 +7,9 @@ import (
 
 func TestWriteConfig(t *testing.T) {
 	config := Config{}
-	config.Log.LogLevel = "info"
+	config.Log.Level = "info"
+	config.Log.FilePath = "./log.txt"
 	config.Component.ComponentName = "Unit Test"
-	config.Component.ComponentConfigFileName = "serviceconfigfile.hcl"
 	config.HTTP.Server.ListeningAddress = "0.0.0.0:9111"
 	config.HTTP.Server.TLSEnabled = false
 	config.HTTP.Clients = make([]HTTPClientConfig, 0)
@@ -37,11 +37,11 @@ func TestWriteConfig(t *testing.T) {
 
 func TestReadConfig(t *testing.T) {
 
-	config, err := readPlatformConfiguration()
+	config, err := getPlatformConfiguration()
 	if err != nil {
 		t.Fail()
 	}
 
 	log.Println(config)
-	log.Println(config.Log.LogLevel)
+	log.Println(config.Log.Level)
 }

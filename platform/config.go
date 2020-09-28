@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"errors"
 	"log"
 	"sync"
 
@@ -8,8 +9,9 @@ import (
 )
 
 var (
-	config *Config
-	mutex  sync.Mutex
+	config                   *Config
+	mutex                    sync.Mutex
+	ErrInvalidConfigFilePath = errors.New("Invalid config file path for settings platform.log.logfilepath")
 )
 
 func init() {
@@ -30,7 +32,7 @@ func writePlatformConfiguration(config Config) error {
 	return nil
 }
 
-func readPlatformConfiguration() (Config, error) {
+func getPlatformConfiguration() (*Config, error) {
 
 	if config == nil {
 		mutex.Lock()
@@ -38,25 +40,32 @@ func readPlatformConfiguration() (Config, error) {
 			err := viper.ReadInConfig()
 			if err != nil {
 				log.Println("Unable to read config file: ", err.Error())
-				return *config, err
+				return config, err
 			}
 			err = viper.UnmarshalKey("platform", &config)
 			if err != nil {
 				log.Println("Error reading config: ", err.Error())
-				return *config, err
+				return config, err
 			}
 		}
+
+		err := config.checkPlatformConfiguration()
+		if err != nil {
+			log.Println("Config file incorrect: ", err.Error())
+			return config, err
+		}
+
 		mutex.Unlock()
 	}
 
-	return *config, nil
+	return config, nil
 }
 
 // Config ... Platform configuration
 type Config struct {
 	Log struct {
-		LogLevel    string
-		LogFilePath string
+		Level    string
+		FilePath string
 	}
 
 	HTTP struct {
@@ -93,8 +102,7 @@ type Config struct {
 	}
 
 	Component struct {
-		ComponentName           string
-		ComponentConfigFileName string
+		ComponentName string
 	}
 }
 
@@ -114,4 +122,12 @@ type OwnTokenConfig struct {
 	ClientSecret    string
 	Username        string
 	Password        string
+}
+
+func (conf *Config) checkPlatformConfiguration() error {
+	if len(conf.Log.FilePath) < 1 {
+		return ErrInvalidConfigFilePath
+	}
+
+	return nil
 }

@@ -2,23 +2,72 @@ package platform
 
 import (
 	"context"
-	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/coreos/go-oidc"
+	"go.uber.org/zap"
 )
 
-// TODO: Use the zap logger and not log
+const (
+	ContextOAuthRoles string = "OAuthRoles"
+)
 
-func loggingMiddleware(next http.Handler) http.Handler {
+type responseWriter struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func wrapResponseWriter(w http.ResponseWriter) *responseWriter {
+	return &responseWriter{ResponseWriter: w}
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	if rw.wroteHeader {
+		return
+	}
+
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
+	rw.wroteHeader = true
+
+	return
+}
+
+func (rw *responseWriter) Status() int {
+	if rw.status == 0 {
+		return 200
+	}
+
+	return rw.status
+}
+
+func loggingMiddleware(next http.Handler, slaMs int64) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Do stuff here
-		log.Println(r.RequestURI)
-		// Call the next handler, which can be another middleware in the chain, or the final handler.
-		next.ServeHTTP(w, r)
+		start := time.Now()
+
+		wrapped := wrapResponseWriter(w)
+		next.ServeHTTP(wrapped, r)
+
+		difference := time.Since(start).Milliseconds()
+
+		Logger.Info("Request completed",
+			zap.Int("statuscode", wrapped.Status()),
+			zap.String("method", r.Method),
+			zap.String("path", r.URL.EscapedPath()),
+			zap.Int64("duration", difference))
+
+		if slaMs > 0 {
+			if difference > slaMs {
+				Logger.Warn("SLA contract exceeded",
+					zap.Int64("SLA", slaMs),
+					zap.String("method", r.Method),
+					zap.String("path", r.URL.EscapedPath()),
+					zap.Int64("duration", difference))
+			}
+		}
 	})
 }
 
@@ -43,8 +92,8 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
-		authorized := true
-
+		authorized := false
+		injectRolesToContext := make([]string, 0)
 		// Only check the claims if a specific role is required for the path
 		//if 1 == 0 {
 		if len(roles) > 0 {
@@ -58,67 +107,52 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 
 			parts := strings.Split(rawAccessToken, " ")
 			if len(parts) != 2 {
-				log.Println("Auth header not build correctly")
+				Logger.Error("Auth header not build correctly")
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 			idToken, err := verifier.Verify(ctx, parts[1])
 			if err != nil {
-				log.Println("Token verification failed: ", err.Error())
+				Logger.Error("Token verification failed", zap.Error(err))
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
 			claims := customClaims{}
 			err = idToken.Claims(&claims)
 			if err != nil {
-				log.Println("Unable to get claims: ", err.Error())
+				Logger.Error("Unable to get claims", zap.Error(err))
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
 
-			injectRoles := ""
 			for neededlIndex := range roles {
 				for tokenRoleIndex := range claims.Roles {
 					if roles[neededlIndex] == claims.Roles[tokenRoleIndex] {
 						authorized = true
-						injectRoles = injectRoles + fmt.Sprintf(",%s", roles[neededlIndex])
+						injectRolesToContext = append(injectRolesToContext, roles[neededlIndex])
 					}
 				}
 			}
 
 			if authorized != true {
-				log.Println("Required role not found: ", roles)
+				Logger.Error("Required role not found",
+					zap.Strings("roles", roles),
+					zap.Strings("alowedRoles", claims.Roles),
+					zap.String("path", r.URL.EscapedPath()),
+					zap.String("method", r.Method))
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
 
 			// TODO: Expand this with scopes
-			r.Header.Add("X-Token-Roles", injectRoles)
+
+			// r.Header.Add("X-Token-Roles", injectRoles)
 		}
 
-		//start := time.Now()
 		if authorized {
-			inner.ServeHTTP(w, r)
+			ctx := context.WithValue(r.Context(), ContextOAuthRoles, injectRolesToContext)
+			inner.ServeHTTP(w, r.WithContext(ctx))
 		}
-
-		r.Header.Del("X-Token-Roles")
-	})
-}
-
-func serviceMethodSlaMiddleware(inner http.Handler, sla int64) http.Handler {
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-		start := time.Now()
-		inner.ServeHTTP(w, r)
-		difference := time.Since(start).Milliseconds()
-
-		if difference > sla {
-			log.Printf("Sla of %v ms was exceeded. Actual execution time: %v ms", sla, difference)
-		} else {
-			log.Printf("Sla of %v ms was met successfully. Actual execution time: %v ms", sla, difference)
-		}
-
 	})
 }
 
@@ -135,7 +169,7 @@ func allowedContentTypeMiddleware(inner http.Handler, contentTypeConfig string) 
 			if strings.ToLower(result) == contentType {
 				inner.ServeHTTP(w, r)
 			} else {
-				log.Println("Media type not allowed: ", result)
+				Logger.Error("Content type not allowed", zap.String("content-type", result))
 				w.WriteHeader(http.StatusUnsupportedMediaType)
 			}
 		} else {

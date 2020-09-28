@@ -12,6 +12,6 @@ var Routes = platform.Routes{
 		Path:        "/",
 		Method:      http.MethodGet,
 		HandlerFunc: service.HelloWorld,
-		SlaMs:       100,
+		SlaMs:       0,
 	},
 }

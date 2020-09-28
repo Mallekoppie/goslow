@@ -1,7 +1,7 @@
 platform:
   log:
-    loglevel: info
-    logfilepath: ""
+    level: info
+    filepath: ./log.txt
   http:
     server:
       listeningaddress: 0.0.0.0:9111
@@ -48,4 +48,3 @@ platform:
           password: testpassword
   component:
     componentname: Unit Test
-    componentconfigfilename: serviceconfigfile.hcl

@@ -11,30 +11,37 @@ import (
 
 var (
 	internalLock       sync.Mutex
-	logger             *zap.Logger
+	Logger             *zap.Logger
 	ErrInvalidLogLevel = errors.New("Incorrect Log level. Unable to translate to ZAP log level")
 )
 
-func getLogger(componentName string, logLevel string, logFilePath string) (*zap.Logger, error) {
-	internalLock.Lock()
-	if logger == nil {
-		log.Println("Creating new logger")
-		config := zap.NewProductionConfig()
-		config.InitialFields = make(map[string]interface{}, 0)
-		config.InitialFields["component"] = componentName
-		config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-		config.OutputPaths = []string{"stderr", "./log.txt"}
+func init() {
+	log.Println("Creating new logger")
 
-		newLogger, err := config.Build()
-		if err != nil {
-			internalLock.Unlock()
-			return nil, err
-		}
-		logger = newLogger
+	platformConfig, err := getPlatformConfiguration()
+	if err != nil {
+		log.Println("Unable to get Platform configuration: ", err.Error())
+		panic(err.Error())
 	}
-	internalLock.Unlock()
+	config := zap.NewProductionConfig()
+	config.InitialFields = make(map[string]interface{}, 0)
+	config.InitialFields["component"] = platformConfig.Component.ComponentName
 
-	return logger, nil
+	logLevel, err := logLevelStringToZapType(platformConfig.Log.Level)
+	if err != nil {
+		log.Println("Unable to convert config log level to internal log level: ", err.Error())
+		panic(err.Error())
+	}
+
+	config.Level = logLevel
+	config.OutputPaths = []string{"stderr", platformConfig.Log.FilePath}
+
+	newLogger, err := config.Build()
+	if err != nil {
+		log.Println("Error while building logger: ", err.Error())
+		panic(err.Error())
+	}
+	Logger = newLogger
 }
 
 func logLevelStringToZapType(input string) (zap.AtomicLevel, error) {
