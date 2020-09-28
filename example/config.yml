@@ -51,4 +51,4 @@ platform:
           username: test username
           password: testpassword
   component:
-    componentname: Unit Test
+    componentname: Example platform service

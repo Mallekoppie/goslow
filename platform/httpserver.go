@@ -53,6 +53,7 @@ func StartHttpServer(routes Routes) {
 		return
 	}
 
+	Logger.Info("Starting new HTTP server", zap.String("ListeingAddress", config.HTTP.Server.ListeningAddress))
 	if config.HTTP.Server.TLSEnabled {
 		Logger.Error("TLS Server stopped: ", zap.Error(
 			http.ListenAndServeTLS(config.HTTP.Server.ListeningAddress,

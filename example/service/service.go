@@ -2,9 +2,11 @@ package service
 
 import (
 	"net/http"
+
+	"github.com/Mallekoppie/goslow/platform"
 )
 
 func HelloWorld(w http.ResponseWriter, r *http.Request) {
-	// w.WriteHeader(http.StatusOK)
+	platform.Logger.Info("We arrived at a new world!!!!")
 	w.Write([]byte("Hello World"))
 }
