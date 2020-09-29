@@ -13,6 +13,10 @@ var (
 	JsonMarshaller JsonMarshallerOrganizer
 )
 
+func init() {
+	JsonMarshaller = JsonMarshallerOrganizer{}
+}
+
 // This is just to make the platform interface nice
 type JsonMarshallerOrganizer struct {
 }
