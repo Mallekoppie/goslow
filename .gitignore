@@ -6,3 +6,5 @@ example/example.exe
 example/log.txt
 platform/database.db
 platform/database.db.lock
+example/database.db
+example/database.db.lock

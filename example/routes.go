@@ -9,6 +9,18 @@ import (
 
 var Routes = platform.Routes{
 	platform.Route{
+		Path:        "/db/write",
+		Method:      http.MethodPost,
+		HandlerFunc: service.WriteObject,
+		SlaMs:       0,
+	},
+	platform.Route{
+		Path:        "/db/read",
+		Method:      http.MethodPost,
+		HandlerFunc: service.ReadObject,
+		SlaMs:       0,
+	},
+	platform.Route{
 		Path:        "/",
 		Method:      http.MethodGet,
 		HandlerFunc: service.HelloWorld,
