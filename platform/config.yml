@@ -48,3 +48,7 @@ platform:
           password: testpassword
   component:
     componentname: Unit Test
+  database:
+    boltdb:
+      enabled: true
+      filename: ./database.db

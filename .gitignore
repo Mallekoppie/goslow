@@ -4,3 +4,5 @@ platform/platformwrite.hcl
 platform/log.txt
 example/example.exe
 example/log.txt
+platform/database.db
+platform/database.db.lock

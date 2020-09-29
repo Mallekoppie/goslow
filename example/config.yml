@@ -52,3 +52,7 @@ platform:
           password: testpassword
   component:
     componentname: Example platform service
+  database:
+    boltdb:
+      enabled: true
+      filename: ./database.db

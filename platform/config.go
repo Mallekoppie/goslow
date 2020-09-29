@@ -14,12 +14,6 @@ var (
 	ErrInvalidConfigFilePath = errors.New("Invalid config file path for settings platform.log.logfilepath")
 )
 
-func init() {
-	viper.SetConfigType("yml")
-	viper.AddConfigPath(".")
-	viper.SetConfigName("config")
-}
-
 func writePlatformConfiguration(conf config) error {
 	viper.Set("platform", conf)
 
@@ -37,6 +31,10 @@ func getPlatformConfiguration() (*config, error) {
 	if internalConfig == nil {
 		mutex.Lock()
 		if internalConfig == nil {
+			viper.SetConfigType("yml")
+			viper.AddConfigPath(".")
+			viper.SetConfigName("config")
+
 			err := viper.ReadInConfig()
 			if err != nil {
 				log.Println("Unable to read config file: ", err.Error())
@@ -103,6 +101,13 @@ type config struct {
 
 	Component struct {
 		ComponentName string
+	}
+
+	Database struct {
+		BoltDB struct {
+			Enabled  bool
+			FileName string
+		}
 	}
 }
 

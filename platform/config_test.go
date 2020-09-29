@@ -32,6 +32,9 @@ func TestWriteConfig(t *testing.T) {
 	config.Auth.Server.Basic.AllowedUsers["user1"] = "pass1"
 	config.Auth.Server.Basic.AllowedUsers["user2"] = "pass2"
 
+	config.Database.BoltDB.Enabled = true
+	config.Database.BoltDB.FileName = "./database.db"
+
 	writePlatformConfiguration(config)
 }
 
