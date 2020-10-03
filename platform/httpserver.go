@@ -53,6 +53,9 @@ func StartHttpServer(routes Routes) {
 		return
 	}
 
+	// Do this for each database we add
+	defer Database.BoltDb.Close()
+
 	Logger.Info("Starting new HTTP server", zap.String("ListeingAddress", config.HTTP.Server.ListeningAddress))
 	if config.HTTP.Server.TLSEnabled {
 		Logger.Error("TLS Server stopped: ", zap.Error(

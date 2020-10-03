@@ -2,10 +2,20 @@ package platform
 
 import (
 	"log"
+	"os"
 	"testing"
 )
 
 func TestStoreAndReadObjectInBoltDB(t *testing.T) {
+	os.Remove("./database.db")
+	os.Remove("./database.db.lock")
+
+	// db, err := InitializePlatformDatabases()
+	// if err != nil {
+	// 	t.Fail()
+	// }
+	// defer db.BoltDb.Close()
+
 	bucketName := "test"
 	id := "123123"
 	initailobject := testObject{
@@ -14,6 +24,7 @@ func TestStoreAndReadObjectInBoltDB(t *testing.T) {
 		Surname: "Test surname",
 	}
 
+	Logger.Debug("Calling SaveObject from test")
 	err := Database.BoltDb.SaveObject("test", id, initailobject)
 	if err != nil {
 		log.Println("Error saving object: ", err.Error())

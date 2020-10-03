@@ -2,7 +2,6 @@ package platform
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 
 	"github.com/boltdb/bolt"
@@ -10,11 +9,16 @@ import (
 )
 
 var (
-	boltDb                *bolt.DB
-	ErrBoltDbIsNotEnabled = errors.New("Bolt DB is not enabled")
+	db *bolt.DB
 )
 
-type BoltDbDatabase struct {
+type boltDbDatabase struct {
+}
+
+func databaseHackToRestartServiceIKnowThisIsBad(conf *config) {
+	os.Chmod(conf.Database.BoltDB.FileName, 0222)
+	os.Remove(conf.Database.BoltDB.FileName + ".lock")
+
 }
 
 func init() {
@@ -22,42 +26,47 @@ func init() {
 	// Don't ask me why
 	// Its too late
 	InitializeLogger()
-}
 
-func getDB() (*bolt.DB, error) {
-	if boltDb == nil {
-		config, err := getPlatformConfiguration()
-		if err != nil {
-			Logger.Fatal("Unable to read platform configuration", zap.Error(err))
-		}
-
-		if config.Database.BoltDB.Enabled == false {
-			Logger.Info("Database BoltDb not enabled")
-			return nil, ErrBoltDbIsNotEnabled
-		}
-
-		db, err := bolt.Open(config.Database.BoltDB.FileName, os.ModeExclusive, nil)
-		if err != nil {
-			Logger.Fatal("Error opening database", zap.Error(err))
-			return nil, err
-		}
-
-		boltDb = db
-
-		return db, nil
-	} else {
-		return boltDb, nil
-	}
-
-}
-
-func (d *BoltDbDatabase) SaveObject(bucket string, id string, object interface{}) error {
-	db, err := getDB()
+	Logger.Debug("Creating boltdb")
+	config, err := getPlatformConfiguration()
 	if err != nil {
-		Logger.Fatal("Error while getting DB", zap.Error(err))
+		Logger.Fatal("Unable to read platform configuration", zap.Error(err))
+	}
+	Logger.Debug("Config read completed")
+	if config.Database.BoltDB.Enabled == false {
+		Logger.Info("Database BoltDb not enabled")
 	}
 
-	err = db.Update(func(tx *bolt.Tx) error {
+	Logger.Debug("Calling open database",
+		zap.String("filename", config.Database.BoltDB.FileName))
+
+	// Hack to make the DB file writeable
+	databaseHackToRestartServiceIKnowThisIsBad(config)
+
+	db, err = bolt.Open(config.Database.BoltDB.FileName, os.ModeExclusive, nil)
+	if err != nil {
+		Logger.Fatal("Error opening database", zap.Error(err))
+	}
+
+	Logger.Debug("Boltdb created without error")
+}
+
+func (d *boltDbDatabase) Close() error {
+	return db.Close()
+}
+
+func (d *boltDbDatabase) SaveObject(bucket string, id string, object interface{}) error {
+
+	Logger.Debug("Saving object to DB",
+		zap.String("bucket", bucket),
+		zap.String("id", id),
+		zap.Any("object", object))
+
+	if db == nil {
+		Logger.Fatal("BoltDB instance is nil")
+	}
+
+	err := db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
 		if err != nil {
 			Logger.Error("Error creating bucket", zap.Error(err))
@@ -87,13 +96,9 @@ func (d *BoltDbDatabase) SaveObject(bucket string, id string, object interface{}
 	return nil
 }
 
-func (d *BoltDbDatabase) ReadObject(bucket string, id string, object interface{}) error {
-	db, err := getDB()
-	if err != nil {
-		Logger.Fatal("Error while getting DB", zap.Error(err))
-	}
+func (d *boltDbDatabase) ReadObject(bucket string, id string, object interface{}) error {
 
-	err = db.View(func(tx *bolt.Tx) error {
+	err := db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
 		result := b.Get([]byte(id))
 		if len(result) > 0 {

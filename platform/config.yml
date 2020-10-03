@@ -1,6 +1,6 @@
 platform:
   log:
-    level: info
+    level: debug
     filepath: ./log.txt
   http:
     server:
