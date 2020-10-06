@@ -8,6 +8,7 @@ import (
 
 	"github.com/coreos/go-oidc"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -174,6 +175,38 @@ func allowedContentTypeMiddleware(inner http.Handler, contentTypeConfig string) 
 			}
 		} else {
 			inner.ServeHTTP(w, r)
+		}
+	})
+}
+
+// Adds 75-80 ms to the response time...
+func basicAuthMiddleware(inner http.Handler, users map[string]string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Logger.Debug("Entered Basic Auth Middleware")
+		username, password, ok := r.BasicAuth()
+		if ok {
+			Logger.Debug("Basic Auth returned ok")
+			allowedPassword := users[username]
+			Logger.Debug("Allowed password", zap.String("passwordhash", allowedPassword))
+
+			if len(allowedPassword) < 1 {
+				Logger.Error("User not allowed")
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+
+			compareError := bcrypt.CompareHashAndPassword([]byte(allowedPassword), []byte(password))
+
+			if compareError != nil {
+				Logger.Error("Password incorrect", zap.Error(compareError))
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			} else {
+				inner.ServeHTTP(w, r)
+			}
+		} else {
+			Logger.Error("Authorization header required")
+			w.WriteHeader(http.StatusUnauthorized)
 		}
 	})
 }

@@ -26,8 +26,13 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 
 		// TODO: Check if enabled before adding these
 		handler = loggingMiddleware(handler, route.SlaMs)
+
+		if conf.Auth.Server.Basic.Enabled {
+			handler = basicAuthMiddleware(handler, conf.Auth.Server.Basic.AllowedUsers)
+		}
+
 		if conf.Auth.Server.OAuth.Enabled {
-			handler = oAuth2Middleware(handler, route.RolesRequired) // Disabled during development
+			handler = oAuth2Middleware(handler, route.RolesRequired)
 		}
 
 		router.
