@@ -130,6 +130,10 @@ func (d *boltDbDatabase) ReadAllObjects(bucket string) (map[string]string, error
 
 	err := db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
+		if b == nil {
+			return ErrNoEntryFoundInDB
+		}
+
 		cursor := b.Cursor()
 
 		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
@@ -138,7 +142,7 @@ func (d *boltDbDatabase) ReadAllObjects(bucket string) (map[string]string, error
 		return nil
 	})
 	if err != nil {
-		Logger.Error("Error readign from database", zap.Error(err))
+		Logger.Error("Error reading from database", zap.Error(err))
 		return results, err
 	}
 
