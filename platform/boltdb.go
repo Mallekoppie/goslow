@@ -16,7 +16,7 @@ type boltDbDatabase struct {
 }
 
 func databaseHackToRestartServiceIKnowThisIsBad(conf *config) {
-	os.Chmod(conf.Database.BoltDB.FileName, 0222)
+	os.Chmod(conf.Database.BoltDB.FileName, 0755)
 	os.Remove(conf.Database.BoltDB.FileName + ".lock")
 
 }
