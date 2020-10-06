@@ -7,7 +7,7 @@ import (
 
 func TestWriteConfig(t *testing.T) {
 	config := config{}
-	config.Log.Level = "info"
+	config.Log.Level = "debug"
 	config.Log.FilePath = "./log.txt"
 	config.Component.ComponentName = "Unit Test"
 	config.HTTP.Server.ListeningAddress = "0.0.0.0:9111"
