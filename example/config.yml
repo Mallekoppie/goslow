@@ -33,7 +33,7 @@ platform:
       # Basic Auth adds 75 - 80 ms to the response time - queue sad face :(
       # Passwords must be hashed using bcrypt. Unencrypted passwords will not work
       basic:
-        enabled: true
+        enabled: false
         allowedusers:
           test: $2a$10$zX3HVDhKWRg2YWrf5VuHYutOOfj4DY.Wk7CsFgEFNgFmQqKBEumJG
           user2: pass2

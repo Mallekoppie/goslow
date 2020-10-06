@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"net/http"
 
 	"github.com/Mallekoppie/goslow/example/model"
@@ -81,4 +82,23 @@ func GetConfiguration(w http.ResponseWriter, r *http.Request) {
 	}
 
 	platform.JsonMarshaller.WriteJsonResponse(w, http.StatusOK, conf)
+}
+
+func ReadAll(w http.ResponseWriter, r *http.Request) {
+
+	results, err := platform.Database.BoltDb.ReadAllObjects("test")
+	if err != nil {
+		platform.Logger.Error("Error getting all objects", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	data := bytes.NewBufferString("")
+	for _, v := range results {
+		data.Write([]byte(v))
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(data.Bytes())
+
 }

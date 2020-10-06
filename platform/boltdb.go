@@ -122,3 +122,25 @@ func (d *boltDbDatabase) ReadObject(bucket string, id string, object interface{}
 
 	return nil
 }
+
+// Returns all entries in the bucket. Values are still json strings
+func (d *boltDbDatabase) ReadAllObjects(bucket string) (map[string]string, error) {
+
+	results := make(map[string]string)
+
+	err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		cursor := b.Cursor()
+
+		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+			results[string(key)] = string(value)
+		}
+		return nil
+	})
+	if err != nil {
+		Logger.Error("Error readign from database", zap.Error(err))
+		return results, err
+	}
+
+	return results, nil
+}

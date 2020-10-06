@@ -32,4 +32,10 @@ var Routes = platform.Routes{
 		HandlerFunc: service.GetConfiguration,
 		SlaMs:       0,
 	},
+	platform.Route{
+		Path:        "/all",
+		Method:      http.MethodGet,
+		HandlerFunc: service.ReadAll,
+		SlaMs:       0,
+	},
 }
