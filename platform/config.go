@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/spf13/viper"
+	"go.uber.org/zap"
 )
 
 var (
@@ -57,6 +58,16 @@ func getPlatformConfiguration() (*config, error) {
 	}
 
 	return internalConfig, nil
+}
+
+func GetComponentConfiguration(key string, object interface{}) error {
+	err := viper.UnmarshalKey(key, &object)
+	if err != nil {
+		Logger.Error("Unable to read component configuration", zap.String("configkey", key), zap.Error(err))
+		return err
+	}
+
+	return nil
 }
 
 // Config ... Platform configuration

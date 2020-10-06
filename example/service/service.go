@@ -3,6 +3,8 @@ package service
 import (
 	"net/http"
 
+	"github.com/Mallekoppie/goslow/example/model"
+
 	"github.com/Mallekoppie/goslow/platform"
 	"go.uber.org/zap"
 )
@@ -48,16 +50,35 @@ func ReadObject(w http.ResponseWriter, r *http.Request) {
 	resultObject := DBTestObject{}
 	err = platform.Database.BoltDb.ReadObject("test", testobject.Id, &resultObject)
 	if err != nil {
-		platform.Logger.Error("Error reading objet", zap.Error(err))
-		w.WriteHeader(http.StatusInternalServerError)
-		return
+		if err == platform.ErrNoEntryFoundInDB {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		} else {
+			platform.Logger.Error("Error reading objet", zap.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
 	}
 
-	platform.JsonMarshaller.WriteJsonResponse(w, 200, resultObject)
+	platform.JsonMarshaller.WriteJsonResponse(w, http.StatusOK, resultObject)
 }
 
 type DBTestObject struct {
 	Id      string `json:"id"`
 	Name    string `json:"name"`
 	Surname string `json:"surname"`
+}
+
+func GetConfiguration(w http.ResponseWriter, r *http.Request) {
+	conf := model.Config{}
+
+	err := platform.GetComponentConfiguration("componentconfigexample", &conf)
+	if err != nil {
+		platform.Logger.Error("Error reading component configuration", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	platform.JsonMarshaller.WriteJsonResponse(w, http.StatusOK, conf)
 }

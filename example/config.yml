@@ -56,3 +56,7 @@ platform:
     boltdb:
       enabled: true
       filename: ./database.db
+
+componentconfigexample:
+  name: my custom config
+  port: 9001

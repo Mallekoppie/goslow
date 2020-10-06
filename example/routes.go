@@ -26,4 +26,10 @@ var Routes = platform.Routes{
 		HandlerFunc: service.HelloWorld,
 		SlaMs:       0,
 	},
+	platform.Route{
+		Path:        "/config",
+		Method:      http.MethodGet,
+		HandlerFunc: service.GetConfiguration,
+		SlaMs:       0,
+	},
 }
