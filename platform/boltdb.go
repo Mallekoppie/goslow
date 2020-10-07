@@ -35,6 +35,7 @@ func init() {
 	Logger.Debug("Config read completed")
 	if config.Database.BoltDB.Enabled == false {
 		Logger.Info("Database BoltDb not enabled")
+		return
 	}
 
 	Logger.Debug("Calling open database",
