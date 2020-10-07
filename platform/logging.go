@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var (
@@ -42,6 +43,7 @@ func InitializeLogger() {
 
 			config.Level = logLevel
 			config.OutputPaths = []string{"stderr", platformConfig.Log.FilePath}
+			config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 
 			newLogger, err := config.Build()
 			if err != nil {
