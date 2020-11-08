@@ -8,3 +8,5 @@ platform/database.db
 platform/database.db.lock
 example/database.db
 example/database.db.lock
+platform/bolt.db.lock
+platform/bolt.db

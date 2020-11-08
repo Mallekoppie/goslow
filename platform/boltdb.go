@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	db *bolt.DB
+	dbBolt *bolt.DB
 )
 
 type boltDbDatabase struct {
@@ -44,7 +44,7 @@ func init() {
 	// Hack to make the DB file writeable
 	databaseHackToRestartServiceIKnowThisIsBad(config)
 
-	db, err = bolt.Open(config.Database.BoltDB.FileName, os.ModeExclusive, nil)
+	dbBolt, err = bolt.Open(config.Database.BoltDB.FileName, os.ModeExclusive, nil)
 	if err != nil {
 		Logger.Fatal("Error opening database", zap.Error(err))
 	}
@@ -53,7 +53,7 @@ func init() {
 }
 
 func (d *boltDbDatabase) Close() error {
-	return db.Close()
+	return dbBolt.Close()
 }
 
 func (d *boltDbDatabase) SaveObject(bucket string, id string, object interface{}) error {
@@ -63,11 +63,11 @@ func (d *boltDbDatabase) SaveObject(bucket string, id string, object interface{}
 		zap.String("id", id),
 		zap.Any("object", object))
 
-	if db == nil {
+	if dbBolt == nil {
 		Logger.Fatal("BoltDB instance is nil")
 	}
 
-	err := db.Update(func(tx *bolt.Tx) error {
+	err := dbBolt.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
 		if err != nil {
 			Logger.Error("Error creating bucket", zap.Error(err))
@@ -99,7 +99,7 @@ func (d *boltDbDatabase) SaveObject(bucket string, id string, object interface{}
 
 func (d *boltDbDatabase) ReadObject(bucket string, id string, object interface{}) error {
 
-	err := db.View(func(tx *bolt.Tx) error {
+	err := dbBolt.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
 		result := b.Get([]byte(id))
 		if len(result) > 0 {
@@ -129,7 +129,7 @@ func (d *boltDbDatabase) ReadAllObjects(bucket string) (map[string]string, error
 
 	results := make(map[string]string)
 
-	err := db.View(func(tx *bolt.Tx) error {
+	err := dbBolt.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
 		if b == nil {
 			return ErrNoEntryFoundInDB
