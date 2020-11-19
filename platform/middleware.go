@@ -86,7 +86,7 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 	ctx := context.Background()
 	provider, err := oidc.NewProvider(ctx, config.Auth.Server.OAuth.IdpWellKnownURL)
 	if err != nil {
-		Logger.Fatal("Error communication with IDP provider", zap.Error(err))
+		Logger.Fatal("Error communication with IDP provider", zap.Error(err), zap.String("provider_url", config.Auth.Server.OAuth.IdpWellKnownURL))
 	}
 
 	oidcConfig := &oidc.Config{
