@@ -51,4 +51,4 @@ platform:
   database:
     boltdb:
       enabled: true
-      filename: ./database.db
+      filename: ./bolt.db
