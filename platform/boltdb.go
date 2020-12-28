@@ -182,3 +182,30 @@ func (d *boltDbDatabase) RemoveObject(bucket string, id string) error {
 
 	return nil
 }
+
+func (d *boltDbDatabase) RemoveBucket(bucket string) error {
+
+	Logger.Debug("Deleting bucket",
+		zap.String("bucket", bucket))
+
+	if dbBolt == nil {
+		Logger.Fatal("BoltDB instance is nil")
+	}
+
+	err := dbBolt.Update(func(tx *bolt.Tx) error {
+		err := tx.DeleteBucket([]byte(bucket))
+		if err != nil {
+			Logger.Error("Error removing bucket", zap.Error(err))
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		Logger.Error("Error updating DB", zap.Error(err))
+		return err
+	}
+
+	return nil
+}
