@@ -78,16 +78,19 @@ type customClaims struct {
 
 func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 
-	ctx := context.Background()
-	// TODO: Get from config
-	provider, err := oidc.NewProvider(ctx, "http://localhost:8180/auth/realms/golang") // this is bad
+	config, err := getPlatformConfiguration()
 	if err != nil {
-		panic(err)
+		Logger.Fatal("unable to load platform configuration", zap.Error(err))
 	}
 
-	// TODO: Get from config
+	ctx := context.Background()
+	provider, err := oidc.NewProvider(ctx, config.Auth.Server.OAuth.IdpWellKnownURL)
+	if err != nil {
+		Logger.Fatal("Error communication with IDP provider", zap.Error(err), zap.String("provider_url", config.Auth.Server.OAuth.IdpWellKnownURL))
+	}
+
 	oidcConfig := &oidc.Config{
-		ClientID: "gotutorial", // this is bad
+		ClientID: config.Auth.Server.OAuth.ClientID,
 	}
 	verifier := provider.Verifier(oidcConfig)
 
@@ -96,7 +99,6 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 		authorized := false
 		injectRolesToContext := make([]string, 0)
 		// Only check the claims if a specific role is required for the path
-		//if 1 == 0 {
 		if len(roles) > 0 {
 			authorized = false
 			rawAccessToken := r.Header.Get("Authorization")
