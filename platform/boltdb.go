@@ -194,6 +194,10 @@ func (d *boltDbDatabase) RemoveBucket(bucket string) error {
 
 	err := dbBolt.Update(func(tx *bolt.Tx) error {
 		err := tx.DeleteBucket([]byte(bucket))
+		if err != nil  && err == bolt.ErrBucketNotFound {
+			return nil
+		}
+
 		if err != nil {
 			Logger.Error("Error removing bucket", zap.Error(err))
 			return err
