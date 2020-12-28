@@ -149,3 +149,36 @@ func (d *boltDbDatabase) ReadAllObjects(bucket string) (map[string]string, error
 
 	return results, nil
 }
+
+func (d *boltDbDatabase) RemoveObject(bucket string, id string) error {
+
+	Logger.Debug("Removing object from bucket",
+		zap.String("bucket", bucket),
+		zap.String("id", id))
+
+	if dbBolt == nil {
+		Logger.Fatal("BoltDB instance is nil")
+	}
+
+	err := dbBolt.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
+		if err != nil {
+			Logger.Error("Error creating bucket", zap.Error(err))
+			return err
+		}
+
+		err = b.Delete([]byte(id))
+		if err != nil {
+			Logger.Error("Error removing key from bucket", zap.String("id", id), zap.String("bucket", bucket))
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		Logger.Error("Error updating DB", zap.Error(err))
+		return err
+	}
+
+	return nil
+}
