@@ -22,7 +22,6 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 
 		// Add the middleware components. The are executed from the bottom up
 		// handler = middleware.AllowedContentType(handler, route.AllowedContentType)
-		// handler = middleware.AllowCors(handler)
 
 		// TODO: Check if enabled before adding these
 		handler = loggingMiddleware(handler, route.SlaMs)
@@ -33,6 +32,10 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 
 		if conf.Auth.Server.OAuth.Enabled {
 			handler = oAuth2Middleware(handler, route.RolesRequired)
+		}
+
+		if conf.HTTP.Server.AllowCorsForLocalDevelopment == true {
+			handler = AllowCorsForLocalDevelopment(handler)
 		}
 
 		router.

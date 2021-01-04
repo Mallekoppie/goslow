@@ -79,10 +79,11 @@ type config struct {
 
 	HTTP struct {
 		Server struct {
-			ListeningAddress string
-			TLSCertFileName  string
-			TLSKeyFileName   string
-			TLSEnabled       bool
+			ListeningAddress             string
+			TLSCertFileName              string
+			TLSKeyFileName               string
+			TLSEnabled                   bool
+			AllowCorsForLocalDevelopment bool
 		}
 
 		Clients []httpClientConfig

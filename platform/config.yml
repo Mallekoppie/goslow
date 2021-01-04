@@ -8,6 +8,7 @@ platform:
       tlscertfilename: ""
       tlskeyfilename: ""
       tlsenabled: false
+      AllowCorsForLocalDevelopment: true
     clients:
     - id: default
       tlsverify: false
