@@ -13,5 +13,11 @@ func TestLoginWithToken(t *testing.T) {
 		t.FailNow()
 	}
 
+	username := secrets["username"]
+	password := secrets["password"]
+
+	log.Println("Found username: ", username)
+	log.Println("Found password: ", password)
+
 	log.Println("Retrieved secrets: ", secrets)
 }

@@ -1,10 +1,12 @@
 package platform
 
 import (
+	"encoding/json"
 	"errors"
 	vaultapi "github.com/hashicorp/vault/api"
 	"go.uber.org/zap"
 	"io/ioutil"
+	"net/http"
 	"time"
 )
 
@@ -56,11 +58,11 @@ func createVaultClient(address string, config *config) (client *vaultapi.Client,
 		if len(config.Vault.CaCert) > 0 {
 			vaultTlsConfig.CACert = config.Vault.CaCert
 		}
+	}
 
-		if config.Vault.Cert.Enabled {
-			vaultTlsConfig.ClientCert = config.Vault.Cert.CertFile
-			vaultTlsConfig.ClientKey = config.Vault.Cert.KeyFile
-		}
+	if config.Vault.Cert.Enabled {
+		vaultTlsConfig.ClientCert = config.Vault.Cert.CertFile
+		vaultTlsConfig.ClientKey = config.Vault.Cert.KeyFile
 	}
 
 	vaultConfig.ConfigureTLS(vaultTlsConfig)
@@ -102,20 +104,35 @@ func setupVaultClients(config *config) error {
 	return nil
 }
 
-func (v *PlatformVault) GetSecrets(path string) (secrets map[string]interface{}, err error) {
+func processVaultSecretResponse(input map[string]interface{}) (secrets map[string]string) {
+	secrets = make(map[string]string, 0)
+	for k := range input {
+		if k == "data" {
+			items := input[k]
+			data := items.(map[string]interface{})
+			for item := range data {
+				secrets[item] = data[item].(string)
+			}
+		}
+	}
+
+	return secrets
+}
+
+func (v *PlatformVault) GetSecrets(path string) (secrets map[string]string, err error) {
 	if !vaultEnabled {
 		return secrets, ErrVaultNotEnabled
 	}
 
 	for _, c := range vaultClientList {
 		if internalConfig.Vault.Token.Enabled {
-			result, err := c.Logical().Read(path)
+			secretResult, err := c.Logical().Read(path)
 			if err != nil {
 				Logger.Error("Error retrieving secret with token", zap.Error(err), zap.String("address", c.Address()))
 				continue
 			}
-			if result.Data != nil {
-				secrets = result.Data
+			if secretResult != nil && secretResult.Data != nil {
+				secrets = processVaultSecretResponse(secretResult.Data)
 			} else {
 				Logger.Error("Result from retrieving secret from vault is nil")
 				continue
@@ -123,18 +140,33 @@ func (v *PlatformVault) GetSecrets(path string) (secrets map[string]interface{},
 
 			break
 		} else if internalConfig.Vault.Cert.Enabled {
-			result, err := c.Logical().Write("/v1/auth/cert/login", nil)
+			request := c.NewRequest("POST", "/v1/auth/cert/login")
+			response, err := c.RawRequest(request)
 			if err != nil {
-				Logger.Error("Error loging in to Vault with cert to get token")
+				Logger.Error("Error loging in to Vault with cert to get token", zap.Error(err))
 				continue
 			}
 
-			id, err := result.TokenID()
-			if err != nil {
-				Logger.Error("Error getting token from cert login to Vault", zap.Error(err))
+			if response.StatusCode != http.StatusOK {
+				Logger.Error("Incorrect responsecode from Vault when logging in with Cert", zap.Int("response_code", response.StatusCode))
 				continue
 			}
-			c.SetToken(id)
+			defer response.Body.Close()
+			responseData, err := ioutil.ReadAll(response.Body)
+			if err != nil {
+				Logger.Error("Error reading login response using cert to Vault", zap.Error(err))
+				continue
+			}
+
+			responseModel := vaultLoginResponse{}
+
+			err = json.Unmarshal(responseData, &responseModel)
+			if err != nil {
+				Logger.Error("Unable too unmarshal response from vault login", zap.Error(err))
+				continue
+			}
+
+			c.SetToken(responseModel.Auth.ClientToken)
 
 			secretResult, err := c.Logical().Read(path)
 			if err != nil {
@@ -142,8 +174,8 @@ func (v *PlatformVault) GetSecrets(path string) (secrets map[string]interface{},
 				continue
 			}
 
-			if secretResult != nil {
-				secrets = secretResult.Data
+			if secretResult != nil && secretResult.Data != nil {
+				secrets = processVaultSecretResponse(secretResult.Data)
 			} else {
 				Logger.Error("Result from retrieving secret from vault is nil")
 				continue
@@ -161,4 +193,32 @@ func (v *PlatformVault) GetSecrets(path string) (secrets map[string]interface{},
 	}
 
 	return secrets, nil
+}
+
+type vaultLoginResponse struct {
+	RequestID     string      `json:"request_id"`
+	LeaseID       string      `json:"lease_id"`
+	Renewable     bool        `json:"renewable"`
+	LeaseDuration int         `json:"lease_duration"`
+	Data          interface{} `json:"data"`
+	WrapInfo      interface{} `json:"wrap_info"`
+	Warnings      interface{} `json:"warnings"`
+	Auth          struct {
+		ClientToken   string   `json:"client_token"`
+		Accessor      string   `json:"accessor"`
+		Policies      []string `json:"policies"`
+		TokenPolicies []string `json:"token_policies"`
+		Metadata      struct {
+			AuthorityKeyID string `json:"authority_key_id"`
+			CertName       string `json:"cert_name"`
+			CommonName     string `json:"common_name"`
+			SerialNumber   string `json:"serial_number"`
+			SubjectKeyID   string `json:"subject_key_id"`
+		} `json:"metadata"`
+		LeaseDuration int    `json:"lease_duration"`
+		Renewable     bool   `json:"renewable"`
+		EntityID      string `json:"entity_id"`
+		TokenType     string `json:"token_type"`
+		Orphan        bool   `json:"orphan"`
+	} `json:"auth"`
 }

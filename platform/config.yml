@@ -56,19 +56,19 @@ platform:
   vault:
     enabled: true
     addresslist:
-      - 'http://localhost:8200'
-    InsecureSkipVerify: false
+      - 'https://localhost:8200'
+    InsecureSkipVerify: true
     IsLocalAgent: false
     MaxRetries: 2
     cacert: ''
     timeoutSeconds: 10
     Token:
-      enabled: true
+      enabled: false
 #      This must be empty if you want to use the token here in the config.
 #      The token path will be used first
-      TokenPath: ''
+      TokenPath: './token.txt'
       token: "s.UD6jWHPH5gPeDVgv9r69wDXx"
     Cert:
-      enabled: false
+      enabled: true
       CertFile: './client.cer'
       KeyFile: './client.key'
