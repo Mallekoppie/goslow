@@ -38,4 +38,10 @@ var Routes = platform.Routes{
 		HandlerFunc: service.ReadAll,
 		SlaMs:       0,
 	},
+	platform.Route{
+		Path:        "/secrets",
+		Method:      http.MethodGet,
+		HandlerFunc: service.GetSecrets,
+		SlaMs:       0,
+	},
 }

@@ -102,3 +102,24 @@ func ReadAll(w http.ResponseWriter, r *http.Request) {
 	w.Write(data.Bytes())
 
 }
+
+func GetSecrets(w http.ResponseWriter, r *http.Request) {
+
+	secrets, err := platform.Vault.GetSecrets("kv-v2/data/dev/test/creds")
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
+	}
+
+	response := GetSecretResponse{
+		Username: secrets["username"],
+		Password: secrets["password"],
+	}
+
+	platform.JsonMarshaller.WriteJsonResponse(w, 200, response)
+}
+
+type GetSecretResponse struct {
+	Username string
+	Password string
+}
