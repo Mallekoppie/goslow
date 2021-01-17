@@ -121,6 +121,26 @@ type config struct {
 			FileName string
 		}
 	}
+
+	Vault struct {
+		Enabled            bool
+		AddressList        []string
+		IsLocalAgent       bool
+		InsecureSkipVerify bool
+		CaCert             string
+		TimeoutSeconds     int64
+		MaxRetries         int
+		Token              struct {
+			Enabled   bool
+			TokenPath string
+			Token     string
+		}
+		Cert struct {
+			Enabled  bool
+			CertFile string
+			KeyFile  string
+		}
+	}
 }
 
 // HTTPClientConfig ... For HTTP client configuration

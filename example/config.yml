@@ -58,6 +58,26 @@ platform:
     boltdb:
       enabled: true
       filename: ./database.db
+  vault:
+    enabled: true
+    addresslist:
+      - 'http://localhost:8200'
+    InsecureSkipVerify: false
+    IsLocalAgent: true
+    MaxRetries: 2
+    cacert: './cacert.cer'
+    timeoutSeconds: 10
+    Token:
+      enabled: true
+      #      This must be empty if you want to use the token here in the config.
+      #      The token path will be used first
+      TokenPath: './token'
+      token: "someTokenValue. This probably shouldn't be used"
+    Cert:
+      enabled: true
+      CertFile: './client.cer'
+      KeyFile: './client.key'
+
 
 componentconfigexample:
   name: my custom config

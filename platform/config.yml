@@ -53,3 +53,22 @@ platform:
     boltdb:
       enabled: true
       filename: ./bolt.db
+  vault:
+    enabled: true
+    addresslist:
+      - 'http://localhost:8200'
+    InsecureSkipVerify: false
+    IsLocalAgent: false
+    MaxRetries: 2
+    cacert: ''
+    timeoutSeconds: 10
+    Token:
+      enabled: true
+#      This must be empty if you want to use the token here in the config.
+#      The token path will be used first
+      TokenPath: ''
+      token: "s.UD6jWHPH5gPeDVgv9r69wDXx"
+    Cert:
+      enabled: false
+      CertFile: './client.cer'
+      KeyFile: './client.key'
