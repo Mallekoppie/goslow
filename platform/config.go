@@ -75,6 +75,11 @@ type config struct {
 	Log struct {
 		Level    string
 		FilePath string
+		//MegaBytes
+		MaxSize    int
+		MaxBackups int
+		// Days
+		MaxAge int
 	}
 
 	HTTP struct {

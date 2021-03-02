@@ -120,6 +120,6 @@ func GetSecrets(w http.ResponseWriter, r *http.Request) {
 }
 
 type GetSecretResponse struct {
-	Username string
-	Password string
+	Username string `json:"username"`
+	Password string `json:"password"`
 }

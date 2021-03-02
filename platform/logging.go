@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var (
@@ -31,25 +32,42 @@ func InitializeLogger() {
 				log.Println("Unable to get Platform configuration: ", err.Error())
 				panic(err.Error())
 			}
-			config := zap.NewProductionConfig()
-			config.InitialFields = make(map[string]interface{}, 0)
-			config.InitialFields["component"] = platformConfig.Component.ComponentName
+			//config := zap.NewProductionConfig()
+			//config.InitialFields = make(map[string]interface{}, 0)
+			//config.InitialFields["component"] = platformConfig.Component.ComponentName
 
 			logLevel, err := logLevelStringToZapType(platformConfig.Log.Level)
 			if err != nil {
-				log.Println("Unable to convert config log level to internal log level: ", err.Error())
-				panic(err.Error())
+				log.Fatalln("Unable to convert config log level to internal log level: ", err.Error())
 			}
 
-			config.Level = logLevel
-			config.OutputPaths = []string{"stderr", platformConfig.Log.FilePath}
-			config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+			//config.Level = logLevel
+			//config.OutputPaths = []string{"stderr", platformConfig.Log.FilePath}
+			//config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 
-			newLogger, err := config.Build()
-			if err != nil {
-				log.Println("Error while building logger: ", err.Error())
-				panic(err.Error())
-			}
+			// Log Rotation
+			syncWriter := zapcore.AddSync(&lumberjack.Logger{
+				Filename:   platformConfig.Log.FilePath,
+				MaxSize:    platformConfig.Log.MaxSize,
+				MaxAge:     platformConfig.Log.MaxAge,
+				MaxBackups: platformConfig.Log.MaxBackups,
+			})
+			encoder := zap.NewProductionEncoderConfig()
+			encoder.EncodeTime = zapcore.ISO8601TimeEncoder
+			core := zapcore.NewCore(zapcore.NewJSONEncoder(encoder), syncWriter, logLevel)
+			newLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
+			newLogger = newLogger.With(zap.Field{
+				Key:    "component",
+				Type:   zapcore.StringType,
+				String: platformConfig.Component.ComponentName,
+			})
+
+			//newLogger, err := config.Build()
+			//if err != nil {
+			//	log.Println("Error while building logger: ", err.Error())
+			//	panic(err.Error())
+			//}
+
 			Logger = newLogger
 		} else {
 			internaLoggerlLock.Unlock()
