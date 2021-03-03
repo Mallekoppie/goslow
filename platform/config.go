@@ -168,7 +168,18 @@ type ownTokenConfig struct {
 
 func (conf *config) checkPlatformConfiguration() error {
 	if len(conf.Log.FilePath) < 1 {
-		return ErrInvalidConfigFilePath
+		log.Println("Configuration Log.FiePath is empty. Defaulting to ./default.log")
+		conf.Log.FilePath = "./default.log"
+	}
+
+	if conf.Log.MaxAge == 0 {
+		log.Println("Configuration Log.MaxAge is empty. Defaulting to 10")
+		conf.Log.MaxAge = 10
+	}
+
+	if conf.Log.MaxSize == 0 {
+		log.Println("Configuration Log.MaxSize is empty. Defaulting to 51200")
+		conf.Log.MaxSize = 51200
 	}
 
 	return nil
