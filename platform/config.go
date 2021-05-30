@@ -2,7 +2,9 @@ package platform
 
 import (
 	"errors"
+	"fmt"
 	"log"
+	"reflect"
 	"sync"
 
 	"github.com/spf13/viper"
@@ -32,26 +34,36 @@ func getPlatformConfiguration() (*config, error) {
 	if internalConfig == nil {
 		mutex.Lock()
 		if internalConfig == nil {
+			initializeDefaults := false
 			viper.SetConfigType("yml")
 			viper.AddConfigPath(".")
 			viper.SetConfigName("config")
 
 			err := viper.ReadInConfig()
-			if err != nil {
+			if err != nil && reflect.TypeOf(err) == reflect.TypeOf(viper.ConfigFileNotFoundError{}) {
+				//	Initialize sensible defaults
+				fmt.Println("Config file `config.yml` not found. Using default configurations")
+				initializeDefaults = true
+			} else if err != nil {
 				log.Println("Unable to read config file: ", err.Error())
 				return internalConfig, err
 			}
-			err = viper.UnmarshalKey("platform", &internalConfig)
-			if err != nil {
-				log.Println("Error reading config: ", err.Error())
-				return internalConfig, err
-			}
-		}
 
-		err := internalConfig.checkPlatformConfiguration()
-		if err != nil {
-			log.Println("Config file incorrect: ", err.Error())
-			return internalConfig, err
+			if initializeDefaults {
+				createDefaultConfiguration()
+			} else {
+				err = viper.UnmarshalKey("platform", &internalConfig)
+				if err != nil {
+					log.Println("Error reading config: ", err.Error())
+					return internalConfig, err
+				}
+
+				err = internalConfig.checkPlatformConfiguration()
+				if err != nil {
+					log.Println("Config file incorrect: ", err.Error())
+					return internalConfig, err
+				}
+			}
 		}
 
 		mutex.Unlock()
@@ -148,7 +160,12 @@ type config struct {
 	}
 
 	Raft struct {
-		Enabled bool
+		Enabled              bool
+		NodeId               string
+		Port                 string
+		SnapshotDir          string
+		StoreDir             string
+		ClusterNodeAddresses []string
 	}
 }
 
@@ -172,7 +189,7 @@ type ownTokenConfig struct {
 
 func (conf *config) checkPlatformConfiguration() error {
 	if len(conf.Log.FilePath) < 1 {
-		log.Println("Configuration Log.FiePath is empty. Defaulting to ./default.log")
+		log.Println("Configuration Log.FilePath is empty. Defaulting to ./default.log")
 		conf.Log.FilePath = "./default.log"
 	}
 
@@ -187,4 +204,19 @@ func (conf *config) checkPlatformConfiguration() error {
 	}
 
 	return nil
+}
+
+func createDefaultConfiguration() {
+	internalConfig = &config{}
+	internalConfig.Auth.Server.Basic.Enabled = false
+	internalConfig.Auth.Server.OAuth.Enabled = false
+	internalConfig.HTTP.Server.TLSEnabled = false
+	internalConfig.HTTP.Server.ListeningAddress = "127.0.0.1:10000"
+	internalConfig.Raft.Enabled = false
+	internalConfig.Log.Level = "info"
+	internalConfig.Log.MaxSize = 100
+	internalConfig.Log.MaxBackups = 5
+	internalConfig.Log.FilePath = "./default.log"
+	internalConfig.Database.BoltDB.Enabled = false
+	internalConfig.Component.ComponentName = "Not Specified"
 }

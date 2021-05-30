@@ -1,4 +1,6 @@
 platform:
+  component:
+    componentname: Platform Core
   log:
     level: debug
     filepath: ./log.txt
@@ -52,8 +54,6 @@ platform:
           clientsecret: remote secret
           username: test username
           password: testpassword
-  component:
-    componentname: Unit Test
   database:
     boltdb:
       enabled: true
@@ -77,3 +77,11 @@ platform:
       enabled: true
       CertFile: './client.cer'
       KeyFile: './client.key'
+  raft:
+    enabled: false
+    nodeId: localtest
+    port: 9600
+    snapshotDir: './snapshot'
+    storeDir: './store'
+    clusterNodeAddresses:
+      - 'localhost:9600'

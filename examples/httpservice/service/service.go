@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"net/http"
 
-	"github.com/Mallekoppie/goslow/examples/model"
+	"github.com/Mallekoppie/goslow/examples/httpservice/model"
 
 	"github.com/Mallekoppie/goslow/platform"
 	"go.uber.org/zap"
