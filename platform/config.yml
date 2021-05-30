@@ -3,10 +3,10 @@ platform:
     level: debug
     filepath: ./log.txt
 #    megabytes
-    MaxSize: 1024
-    MaxBackups: 10
+#    MaxSize: 1024
+#    MaxBackups: 10
 #    Days
-    MaxAge: 30
+#    MaxAge: 30
   http:
     server:
       listeningaddress: 0.0.0.0:9111

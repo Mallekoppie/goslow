@@ -14,3 +14,9 @@ platform/bolt.db
 /platform/cacert.pem
 /platform/client.cer
 /platform/client.key
+/examples/httpservice/log.txt
+/examples/httpservice/example.exe
+/examples/httpservice/database.db.lock
+/examples/httpservice/database.db
+/examples/httpservice/client.key
+/examples/httpservice/client.cer

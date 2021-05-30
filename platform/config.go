@@ -146,6 +146,10 @@ type config struct {
 			KeyFile  string
 		}
 	}
+
+	Raft struct {
+		Enabled bool
+	}
 }
 
 // HTTPClientConfig ... For HTTP client configuration

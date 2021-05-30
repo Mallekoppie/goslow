@@ -3,7 +3,7 @@ package main
 import (
 	"net/http"
 
-	"github.com/Mallekoppie/goslow/example/service"
+	"github.com/Mallekoppie/goslow/examples/service"
 	"github.com/Mallekoppie/goslow/platform"
 )
 
