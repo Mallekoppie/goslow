@@ -79,9 +79,28 @@ platform:
       KeyFile: './client.key'
   raft:
     enabled: false
-    nodeId: localtest
-    port: 9600
+     BindAddress: 'localhost:9601'
+    BindPort: 9601
+    nodeId: one
     snapshotDir: './snapshot'
     storeDir: './store'
-    clusterNodeAddresses:
-      - 'localhost:9600'
+    HeartbeatTimeout: '1000ms'
+    ElectionTimeout: '1000ms'
+    CommitTimeout: '50ms'
+    MaxAppendEntries: 64
+    ShutdownOnRemove: true
+    TrailingLogs: 10240
+    SnapshotInterval: '120s'
+    SnapshotThreshold: 8192
+    LeaderLeaseTimeout: '500ms'
+    LogLevel: 'DEBUG'
+#    Should be equal to the cluster size
+    TcpMaxPool: 3
+    TcpTimeout: '30s'
+    RaftNodes:
+      - nodeId: 'one'
+        address: 'localhost:9601'
+      - nodeId: 'two'
+        address: 'localhost:9611'
+      - nodeId: 'three'
+        address: 'localhost:9621'

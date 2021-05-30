@@ -20,3 +20,4 @@ platform/bolt.db
 /examples/httpservice/database.db
 /examples/httpservice/client.key
 /examples/httpservice/client.cer
+/platform/default.log

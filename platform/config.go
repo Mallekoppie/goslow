@@ -159,14 +159,35 @@ type config struct {
 		}
 	}
 
-	Raft struct {
-		Enabled              bool
-		NodeId               string
-		Port                 string
-		SnapshotDir          string
-		StoreDir             string
-		ClusterNodeAddresses []string
-	}
+	Raft raftConfiguration
+}
+
+type raftConfiguration struct {
+	Enabled              bool
+	BindAddress          string
+	BindPort             string
+	NodeId               string
+	SnapshotDir          string
+	StoreDir             string
+	ClusterNodeAddresses []string
+	HeartbeatTimeout     string
+	ElectionTimeout      string
+	CommitTimeout        string
+	MaxAppendEntries     int
+	ShutdownOnRemove     *bool
+	TrailingLogs         uint64
+	SnapshotInterval     string
+	SnapshotThreshold    uint64
+	LeaderLeaseTimeout   string
+	LogLevel             string
+	TcpMaxPool           int
+	TcpTimeout           string
+	RaftNodes            []raftNode
+}
+
+type raftNode struct {
+	NodeID  string
+	Address string
 }
 
 // HTTPClientConfig ... For HTTP client configuration
