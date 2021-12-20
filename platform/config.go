@@ -156,13 +156,26 @@ type httpClientConfig struct {
 
 // OwnTokenConfig ... Will need to secure the credentials in the future
 type clientTokenConfig struct {
-	ID               string
-	IdpWellKnownURL  string
-	IdpTokenEndpoint string
-	ClientID         string
-	ClientSecret     string
-	Username         string
-	Password         string
+	ID                       string
+	IdpWellKnownURL          string
+	IdpTokenEndpoint         string
+	ClientID                 string
+	ClientSecret             string
+	Username                 string
+	Password                 string
+	VaultPath                string
+	VaultClientIdKey         string
+	VaultClientSecretKey     string
+	VaultUsernameKey         string
+	VaultPasswordKey         string
+	VaultIdpTokenEndpointKey string
+
+	vaultClientIdValue         string
+	vaultClientSecretValue     string
+	vaultUsernameValue         string
+	vaultPasswordValue         string
+	vaultIdpTokenEndpointValue string
+	vaultEnabled               bool
 }
 
 func (conf *config) checkPlatformConfiguration() error {

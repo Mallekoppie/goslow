@@ -46,7 +46,8 @@ platform:
           clientsecret: a4fed4bd-81d9-4267-8506-3fe805b7dc27
           username:
           password:
-          vaultPath: test
+          vaultEnabled: true
+          vaultPath: secret/data/test
           vaultClientIdKey: client-id
           vaultClientSecretKey: client-secret
           vaultUsernameKey: username
@@ -67,7 +68,7 @@ platform:
   vault:
     enabled: true
     addresslist:
-      - 'https://localhost:8200'
+      - 'http://localhost:8200'
     InsecureSkipVerify: true
     IsLocalAgent: false
     MaxRetries: 2

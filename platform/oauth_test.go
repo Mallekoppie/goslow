@@ -6,11 +6,10 @@ import (
 )
 
 func TestGetOAuth2Token(t *testing.T) {
-	token, refreshToken, err := GetToken("default")
+	token, err := GetToken("default")
 	if err != nil {
 		t.FailNow()
 	}
 
 	fmt.Println(token)
-	fmt.Println(refreshToken)
 }

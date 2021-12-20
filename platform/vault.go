@@ -11,33 +11,43 @@ import (
 )
 
 var (
-	Vault                           PlatformVault
+	Vault                           platformVault
 	vaultClientList                 []*vaultapi.Client
 	vaultEnabled                    bool
+	vaultInitialized                = false
 	ErrVaultNotEnabled              = errors.New("Vault not enabled")
 	ErrVaultUnableToReadSecrets     = errors.New("Unable to read secrets from Vault")
 	ErrVaultNoAuthMethodsConfigured = errors.New("No auth methods configured for Vault")
 )
 
-type PlatformVault struct {
+type platformVault struct {
 }
 
 func init() {
-	Vault = PlatformVault{}
-	config, err := getPlatformConfiguration()
-	if err != nil {
-		Logger.Fatal("Error loading configuration in Vault initialization", zap.Error(err))
+	initializeVault()
+}
+
+func initializeVault() {
+	if vaultInitialized == false {
+		Vault = platformVault{}
+		config, err := getPlatformConfiguration()
+		if err != nil {
+			Logger.Fatal("Error loading configuration in Vault initialization", zap.Error(err))
+		}
+
+		if config.Vault.Enabled {
+			vaultEnabled = true
+			err = setupVaultClients(config)
+			if err != nil {
+				Logger.Fatal("Unable to create vault client during initialization", zap.Error(err))
+			}
+		} else {
+			vaultEnabled = false
+		}
+
+		vaultInitialized = true
 	}
 
-	if config.Vault.Enabled {
-		vaultEnabled = true
-		err = setupVaultClients(config)
-		if err != nil {
-			Logger.Fatal("Unable to create vault client during initialization", zap.Error(err))
-		}
-	} else {
-		vaultEnabled = false
-	}
 }
 
 func createVaultClient(address string, config *config) (client *vaultapi.Client, err error) {
@@ -119,7 +129,7 @@ func processVaultSecretResponse(input map[string]interface{}) (secrets map[strin
 	return secrets
 }
 
-func (v *PlatformVault) GetSecrets(path string) (secrets map[string]string, err error) {
+func (v *platformVault) GetSecrets(path string) (secrets map[string]string, err error) {
 	if !vaultEnabled {
 		return secrets, ErrVaultNotEnabled
 	}
