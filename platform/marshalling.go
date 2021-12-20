@@ -10,18 +10,18 @@ import (
 )
 
 var (
-	JsonMarshaller JsonMarshallerOrganizer
+	JsonMarshaller jsonMarshallerOrganizer
 )
 
 func init() {
-	JsonMarshaller = JsonMarshallerOrganizer{}
+	JsonMarshaller = jsonMarshallerOrganizer{}
 }
 
 // This is just to make the platform interface nice
-type JsonMarshallerOrganizer struct {
+type jsonMarshallerOrganizer struct {
 }
 
-func (j *JsonMarshallerOrganizer) ReadJsonRequest(requestBody io.ReadCloser, outputType interface{}) error {
+func (j *jsonMarshallerOrganizer) ReadJsonRequest(requestBody io.ReadCloser, outputType interface{}) error {
 	defer requestBody.Close()
 
 	data, err := ioutil.ReadAll(requestBody)
@@ -39,7 +39,7 @@ func (j *JsonMarshallerOrganizer) ReadJsonRequest(requestBody io.ReadCloser, out
 	return nil
 }
 
-func (j *JsonMarshallerOrganizer) WriteJsonResponse(w http.ResponseWriter, statuscode int, response interface{}) {
+func (j *jsonMarshallerOrganizer) WriteJsonResponse(w http.ResponseWriter, statuscode int, response interface{}) {
 	responseData, err := json.Marshal(response)
 	if err != nil {
 		Logger.Error("Unable to marshal response object", zap.Error(err))

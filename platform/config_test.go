@@ -23,10 +23,10 @@ import (
 //	config.Auth.Server.OAuth.AllowedAlgorithms = append(config.Auth.Server.OAuth.AllowedAlgorithms, "rs256")
 //	config.Auth.Server.OAuth.AllowedAlgorithms = append(config.Auth.Server.OAuth.AllowedAlgorithms, "rs384")
 //
-//	config.Auth.Client.OAuth.OwnTokens = make([]ownTokenConfig, 0)
-//	config.Auth.Client.OAuth.OwnTokens = append(config.Auth.Client.OAuth.OwnTokens, ownTokenConfig{ID: "default", ClientID: "test client ID",
+//	config.Auth.Client.OAuth.OwnTokens = make([]clientTokenConfig, 0)
+//	config.Auth.Client.OAuth.OwnTokens = append(config.Auth.Client.OAuth.OwnTokens, clientTokenConfig{ID: "default", ClientID: "test client ID",
 //		ClientSecret: "some secret", Username: "test username", Password: "testpassword"})
-//	config.Auth.Client.OAuth.OwnTokens = append(config.Auth.Client.OAuth.OwnTokens, ownTokenConfig{ID: "exsternalApi", ClientID: "remoteClientID",
+//	config.Auth.Client.OAuth.OwnTokens = append(config.Auth.Client.OAuth.OwnTokens, clientTokenConfig{ID: "exsternalApi", ClientID: "remoteClientID",
 //		ClientSecret: "remote secret", Username: "test username", Password: "testpassword"})
 //
 //	config.Auth.Server.Basic.AllowedUsers = make(map[string]string, 0)

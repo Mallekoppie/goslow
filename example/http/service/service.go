@@ -2,9 +2,8 @@ package service
 
 import (
 	"bytes"
+	"github.com/Mallekoppie/goslow/example/http/model"
 	"net/http"
-
-	"github.com/Mallekoppie/goslow/example/model"
 
 	"github.com/Mallekoppie/goslow/platform"
 	"go.uber.org/zap"

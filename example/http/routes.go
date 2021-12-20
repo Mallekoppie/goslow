@@ -1,9 +1,9 @@
 package main
 
 import (
+	"github.com/Mallekoppie/goslow/example/http/service"
 	"net/http"
 
-	"github.com/Mallekoppie/goslow/example/service"
 	"github.com/Mallekoppie/goslow/platform"
 )
 

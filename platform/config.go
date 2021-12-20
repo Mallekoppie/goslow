@@ -110,9 +110,7 @@ type config struct {
 		}
 
 		Client struct {
-			OAuth struct {
-				OwnTokens []ownTokenConfig
-			}
+			OAuth []clientTokenConfig
 		}
 	}
 
@@ -157,13 +155,14 @@ type httpClientConfig struct {
 }
 
 // OwnTokenConfig ... Will need to secure the credentials in the future
-type ownTokenConfig struct {
-	ID              string
-	IdpWellKnownURL string
-	ClientID        string
-	ClientSecret    string
-	Username        string
-	Password        string
+type clientTokenConfig struct {
+	ID               string
+	IdpWellKnownURL  string
+	IdpTokenEndpoint string
+	ClientID         string
+	ClientSecret     string
+	Username         string
+	Password         string
 }
 
 func (conf *config) checkPlatformConfiguration() error {
