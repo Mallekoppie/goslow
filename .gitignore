@@ -4,8 +4,8 @@ platform/platformwrite.hcl
 platform/log.txt
 example/example.exe
 example/log.txt
-platform/database.db
-platform/database.db.lock
+database.db
+database.db.lock
 example/database.db
 example/database.db.lock
 platform/bolt.db.lock
@@ -14,3 +14,6 @@ platform/bolt.db
 /platform/cacert.pem
 /platform/client.cer
 /platform/client.key
+/example/forwardClientToken/client/logic/database.db
+log.txt
+*.exe
