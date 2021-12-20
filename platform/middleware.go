@@ -128,11 +128,11 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 				return
 			}
 
-			for neededlIndex := range roles {
+			for neededIndex := range roles {
 				for tokenRoleIndex := range claims.Roles {
-					if roles[neededlIndex] == claims.Roles[tokenRoleIndex] {
+					if roles[neededIndex] == claims.Roles[tokenRoleIndex] {
 						authorized = true
-						injectRolesToContext = append(injectRolesToContext, roles[neededlIndex])
+						injectRolesToContext = append(injectRolesToContext, roles[neededIndex])
 					}
 				}
 			}
@@ -140,7 +140,7 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 			if authorized != true {
 				Logger.Error("Required role not found",
 					zap.Strings("roles", roles),
-					zap.Strings("alowedRoles", claims.Roles),
+					zap.Strings("allowedRoles", claims.Roles),
 					zap.String("path", r.URL.EscapedPath()),
 					zap.String("method", r.Method))
 				w.WriteHeader(http.StatusUnauthorized)

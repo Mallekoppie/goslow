@@ -9,9 +9,10 @@ import (
 
 var Routes = platform.Routes{
 	platform.Route{
-		Path:        "/",
-		Method:      http.MethodGet,
-		HandlerFunc: service.HelloWorld,
-		SlaMs:       0,
+		Path:          "/",
+		Method:        http.MethodGet,
+		HandlerFunc:   service.HelloWorld,
+		SlaMs:         0,
+		RolesRequired: []string{"user"},
 	},
 }

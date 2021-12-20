@@ -156,20 +156,23 @@ type httpClientConfig struct {
 
 // OwnTokenConfig ... Will need to secure the credentials in the future
 type clientTokenConfig struct {
-	ID                       string
-	IdpWellKnownURL          string
-	IdpTokenEndpoint         string
-	ClientID                 string
-	ClientSecret             string
-	Username                 string
-	Password                 string
-	VaultPath                string
-	VaultClientIdKey         string
-	VaultClientSecretKey     string
-	VaultUsernameKey         string
-	VaultPasswordKey         string
-	VaultIdpTokenEndpointKey string
+	ID                        string
+	IdpWellKnownURL           string
+	RenewCheckIntervalSeconds float64
+	RenewCheckTimeMinutes     float64
+	IdpTokenEndpoint          string
+	ClientID                  string
+	ClientSecret              string
+	Username                  string
+	Password                  string
+	VaultPath                 string
+	VaultClientIdKey          string
+	VaultClientSecretKey      string
+	VaultUsernameKey          string
+	VaultPasswordKey          string
+	VaultIdpTokenEndpointKey  string
 
+	// Internal for the retrieved Vault values
 	vaultClientIdValue         string
 	vaultClientSecretValue     string
 	vaultUsernameValue         string

@@ -1,19 +1,17 @@
 platform:
   log:
-    level: debug
-    filepath: ./log.txt
-#    megabytes
-    MaxSize: 1024
-    MaxBackups: 10
-#    Days
-    MaxAge: 30
+    # debug
+    # info
+    # warn
+    # error
+    level: info
+    filepath: "./log.txt"
   http:
     server:
-      listeningaddress: 0.0.0.0:9111
+      listeningaddress: 0.0.0.0:9112
       tlscertfilename: ""
       tlskeyfilename: ""
       tlsenabled: false
-      AllowCorsForLocalDevelopment: true
     clients:
     - id: default
       tlsverify: false
@@ -32,40 +30,35 @@ platform:
         allowedalgorithms:
         - rs256
         - rs384
+      # Basic Auth adds 75 - 80 ms to the response time - queue sad face :(
+      # Passwords must be hashed using bcrypt. Unencrypted passwords will not work
       basic:
         enabled: false
         allowedusers:
-          user1: pass1
+          test: $2a$10$zX3HVDhKWRg2YWrf5VuHYutOOfj4DY.Wk7CsFgEFNgFmQqKBEumJG
           user2: pass2
     client:
       oauth:
         - id: default
           renewCheckIntervalSeconds: 10
           renewCheckTimeMinutes: 5
-          IdpTokenEndpoint: ""
-          clientid: federate-token-client
-          clientsecret: a4fed4bd-81d9-4267-8506-3fe805b7dc27
-          username:
-          password:
-          vaultEnabled: true
-          vaultPath: secret/data/test
+          IdpTokenEndpoint: "http://localhost:8080/auth/realms/master/protocol/openid-connect/token"
+          clientid: federate-token-server
+          clientsecret: 8aedc9bf-7e00-47e0-8760-e3e9e5d93c62
+          username: test
+          password: test
+          vaultPath:
           vaultClientIdKey: client-id
           vaultClientSecretKey: client-secret
           vaultUsernameKey: username
           vaultPasswordKey: password
           vaultIdpTokenEndpointKey: token-endpoint
-        - id: exsternalApi
-          idpwellknownurl: ""
-          clientid: remoteClientID
-          clientsecret: remote secret
-          username: test username
-          password: testpassword
   component:
-    componentname: Unit Test
+    componentname: Example platform service
   database:
     boltdb:
-      enabled: false
-      filename: ./bolt.db
+      enabled: true
+      filename: ./database.db
   vault:
     enabled: true
     addresslist:
@@ -77,11 +70,16 @@ platform:
     timeoutSeconds: 10
     Token:
       enabled: true
-#      This must be empty if you want to use the token here in the config.
-#      The token path will be used first
+      #      This must be empty if you want to use the token here in the config.
+      #      The token path will be used first
       TokenPath: ''
       token: "s.aRADbzy3XXaH6dEj3hvHC3BN"
     Cert:
       enabled: false
       CertFile: './client.cer'
       KeyFile: './client.key'
+
+
+componentconfigexample:
+  name: my custom config
+  port: 9001
