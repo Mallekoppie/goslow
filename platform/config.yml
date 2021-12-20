@@ -39,13 +39,19 @@ platform:
           user2: pass2
     client:
       oauth:
-        owntokens:
         - id: default
           idpwellknownurl: ""
-          clientid: test client ID
-          clientsecret: some secret
-          username: test username
-          password: testpassword
+          IdpTokenEndpoint: ""
+          clientid: federate-token-client
+          clientsecret: a4fed4bd-81d9-4267-8506-3fe805b7dc27
+          username:
+          password:
+          vaultPath: test
+          vaultClientIdKey: client-id
+          vaultClientSecretKey: client-secret
+          vaultUsernameKey: username
+          vaultPasswordKey: password
+          vaultIdpTokenEndpointKey: token-endpoint
         - id: exsternalApi
           idpwellknownurl: ""
           clientid: remoteClientID
@@ -56,7 +62,7 @@ platform:
     componentname: Unit Test
   database:
     boltdb:
-      enabled: true
+      enabled: false
       filename: ./bolt.db
   vault:
     enabled: true
@@ -68,12 +74,12 @@ platform:
     cacert: ''
     timeoutSeconds: 10
     Token:
-      enabled: false
+      enabled: true
 #      This must be empty if you want to use the token here in the config.
 #      The token path will be used first
-      TokenPath: './token.txt'
-      token: "s.UD6jWHPH5gPeDVgv9r69wDXx"
+      TokenPath: ''
+      token: "s.aRADbzy3XXaH6dEj3hvHC3BN"
     Cert:
-      enabled: true
+      enabled: false
       CertFile: './client.cer'
       KeyFile: './client.key'
