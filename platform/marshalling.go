@@ -47,6 +47,7 @@ func (j *jsonMarshallerOrganizer) WriteJsonResponse(w http.ResponseWriter, statu
 		return
 	}
 
+	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(statuscode)
 	w.Write(responseData)
 }
