@@ -220,12 +220,12 @@ func internalGetOAuth2Token(id string) (accessToken string, err error) {
 	return oauthResponse.AccessToken, nil
 }
 
-func ValidateClientToken(rawToken string) (parsedToken *jwt.Token, err error) {
+func (o oAuthOrganiser) ValidateClientToken(rawToken string) (parsedToken *jwt.Token, claims map[string]interface{}, err error) {
 	token, _ := jwt.Parse(rawToken, func(token *jwt.Token) (interface{}, error) {
 		return token, nil
 	})
 
-	claims := token.Claims.(jwt.MapClaims)
+	claims = token.Claims.(jwt.MapClaims)
 	issuer := claims["iss"].(string)
 
 	jwksUrl, ok := issuerJwkUrlMap[issuer]
@@ -264,10 +264,10 @@ func ValidateClientToken(rawToken string) (parsedToken *jwt.Token, err error) {
 	})
 	if err != nil {
 		Logger.Error("Token Validation failed", zap.Error(err))
-		return parsedToken, err
+		return parsedToken, claims, err
 	}
 
-	return parsedToken, nil
+	return parsedToken, claims, nil
 }
 
 func getJksUrl(issuerUrl string) (url string, err error) {

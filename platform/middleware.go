@@ -12,7 +12,10 @@ import (
 )
 
 const (
-	ContextOAuthRoles string = "OAuthRoles"
+	ContextOAuthRoles             string = "OAuthRoles"
+	ContextOAuthClientToken       string = "OAuthClientToken"
+	ContextOAuthPreferredUsername string = "OAuthPreferredUsername"
+	ContextOAuthIssuer            string = "OAuthIssuer"
 )
 
 type responseWriter struct {
@@ -73,7 +76,9 @@ func loggingMiddleware(next http.Handler, slaMs int64) http.Handler {
 }
 
 type customClaims struct {
-	Roles []string `json:"roles,omitempty"`
+	Roles             []string `json:"roles,omitempty"`
+	Issuer            string   `json:"iss,omitempty"`
+	PreferredUsername string   `json:"preferred_username,omitempty"`
 }
 
 func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
@@ -98,6 +103,9 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 
 		authorized := false
 		injectRolesToContext := make([]string, 0)
+		accessToken := ""
+		issuer := ""
+		preferredUsername := ""
 		// Only check the claims if a specific role is required for the path
 		if len(roles) > 0 {
 			authorized = false
@@ -114,6 +122,7 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
+			accessToken = parts[1]
 			idToken, err := verifier.Verify(ctx, parts[1])
 			if err != nil {
 				Logger.Error("Token verification failed", zap.Error(err))
@@ -137,6 +146,9 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 				}
 			}
 
+			issuer = claims.Issuer
+			preferredUsername = claims.PreferredUsername
+
 			if authorized != true {
 				Logger.Error("Required role not found",
 					zap.Strings("roles", roles),
@@ -148,12 +160,13 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 			}
 
 			// TODO: Expand this with scopes
-
-			// r.Header.Add("X-Token-Roles", injectRoles)
 		}
 
 		if authorized {
 			ctx := context.WithValue(r.Context(), ContextOAuthRoles, injectRolesToContext)
+			ctx = context.WithValue(ctx, ContextOAuthClientToken, accessToken)
+			ctx = context.WithValue(ctx, ContextOAuthIssuer, issuer)
+			ctx = context.WithValue(ctx, ContextOAuthPreferredUsername, preferredUsername)
 			inner.ServeHTTP(w, r.WithContext(ctx))
 		}
 	})

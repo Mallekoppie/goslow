@@ -15,7 +15,7 @@ func init() {
 	client = platform.CreateHttpClient("default")
 }
 
-func CallServer() error {
+func CallServer(clientToken string) error {
 	token, err := platform.OAuth.GetToken("default")
 	if err != nil {
 		return err
@@ -27,6 +27,7 @@ func CallServer() error {
 	}
 
 	request.Header.Add("Authorization", "Bearer "+token)
+	request.Header.Add("X-Client-Token", clientToken)
 
 	response, err := client.Do(request)
 	if err != nil {

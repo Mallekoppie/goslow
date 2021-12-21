@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/Mallekoppie/goslow/example/http/service"
+	"github.com/Mallekoppie/goslow/example/forwardClientToken/server/service"
 	"net/http"
 
 	"github.com/Mallekoppie/goslow/platform"

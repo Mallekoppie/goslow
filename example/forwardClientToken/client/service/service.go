@@ -10,7 +10,14 @@ import (
 func HelloWorld(w http.ResponseWriter, r *http.Request) {
 	platform.Logger.Info("We arrived at a new world!!!!")
 
-	err := logic.CallServer()
+	clientToken := r.Context().Value(platform.ContextOAuthClientToken).(string)
+
+	if len(clientToken) < 1 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	err := logic.CallServer(clientToken)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
