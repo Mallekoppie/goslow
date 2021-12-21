@@ -39,19 +39,19 @@ platform:
           user2: pass2
     client:
       oauth:
-        owntokens:
-        - id: default
-          idpwellknownurl: ""
-          clientid: test client ID
-          clientsecret: some secret
-          username: test username
-          password: testpassword
-        - id: exsternalApi
-          idpwellknownurl: ""
-          clientid: remoteClientID
-          clientsecret: remote secret
-          username: test username
-          password: testpassword
+#        owntokens:
+#        - id: default
+#          idpwellknownurl: ""
+#          clientid: test client ID
+#          clientsecret: some secret
+#          username: test username
+#          password: testpassword
+#        - id: exsternalApi
+#          idpwellknownurl: ""
+#          clientid: remoteClientID
+#          clientsecret: remote secret
+#          username: test username
+#          password: testpassword
   component:
     componentname: Example platform service
   database:

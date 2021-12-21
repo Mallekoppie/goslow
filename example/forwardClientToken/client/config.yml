@@ -24,9 +24,9 @@ platform:
   auth:
     server:
       oauth:
-        enabled: false
-        idpwellknownurl: ""
-        clientid: ""
+        enabled: true
+        idpwellknownurl: "http://localhost:8080/auth/realms/master"
+        clientid: "federate-token-client"
         allowedalgorithms:
           - rs256
           - rs384
