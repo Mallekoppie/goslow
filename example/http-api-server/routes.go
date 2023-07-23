@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/Mallekoppie/goslow/example/http/service"
+	"github.com/Mallekoppie/goslow/example/http-api-server/service"
 	"net/http"
 
 	"github.com/Mallekoppie/goslow/platform"
@@ -12,7 +12,7 @@ var Routes = platform.Routes{
 		Path:        "/db/write",
 		Method:      http.MethodPost,
 		HandlerFunc: service.WriteObject,
-		SlaMs:       0,
+		SlaMs:       10,
 	},
 	platform.Route{
 		Path:        "/db/read",

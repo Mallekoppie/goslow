@@ -1,6 +1,9 @@
 package platform
 
 import (
+	"embed"
+	"fmt"
+	"io/fs"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -48,21 +51,17 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 	return router, nil
 }
 
-func StartHttpServer(routes Routes) {
+func startHttpServerInternal(router *mux.Router) {
 	config, err := getPlatformConfiguration()
 	if err != nil {
 		Logger.Error("Error reading platform configuration", zap.Error(err))
 		return
 	}
 
-	router, err := newRouter(routes)
-	if err != nil {
-		Logger.Fatal("Error starting HTTP server", zap.Error(err))
-		return
-	}
-
 	// Do this for each database we add
-	defer Database.BoltDb.Close()
+	if config.Database.BoltDB.Enabled {
+		defer Database.BoltDb.Close()
+	}
 
 	Logger.Info("Starting new HTTP server", zap.String("ListeingAddress", config.HTTP.Server.ListeningAddress))
 	if config.HTTP.Server.TLSEnabled {
@@ -75,6 +74,33 @@ func StartHttpServer(routes Routes) {
 		Logger.Error("HTTP Server stopped: ", zap.Error(
 			http.ListenAndServe(config.HTTP.Server.ListeningAddress, router)))
 	}
+}
+
+func StartHttpServer(routes Routes) {
+	router, err := newRouter(routes)
+	if err != nil {
+		Logger.Fatal("Error starting HTTP server", zap.Error(err))
+		return
+	}
+
+	startHttpServerInternal(router)
+}
+
+func StartHttpServerWithHtmlHosting(routes Routes, dist embed.FS) {
+	router, err := newRouter(routes)
+	if err != nil {
+		Logger.Fatal("Error starting HTTP server", zap.Error(err))
+		return
+	}
+
+	stripped, err := fs.Sub(dist, "dist")
+	if err != nil {
+		fmt.Println("Error stripping frontend")
+	}
+	fileServer := http.FileServer(http.FS(stripped))
+	router.PathPrefix("/").Handler(fileServer)
+
+	startHttpServerInternal(router)
 }
 
 type Route struct {

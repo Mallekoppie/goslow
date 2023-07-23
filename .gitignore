@@ -17,3 +17,4 @@ platform/bolt.db
 /example/forwardClientToken/client/logic/database.db
 log.txt
 *.exe
+/example/http-web-server/log.log
