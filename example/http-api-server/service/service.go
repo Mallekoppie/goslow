@@ -2,7 +2,7 @@ package service
 
 import (
 	"bytes"
-	"github.com/Mallekoppie/goslow/example/http/model"
+	"github.com/Mallekoppie/goslow/example/http-api-server/model"
 	"net/http"
 
 	"github.com/Mallekoppie/goslow/platform"
