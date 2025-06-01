@@ -194,7 +194,7 @@ func (d *boltDbDatabase) RemoveBucket(bucket string) error {
 
 	err := dbBolt.Update(func(tx *bolt.Tx) error {
 		err := tx.DeleteBucket([]byte(bucket))
-		if err != nil  && err == bolt.ErrBucketNotFound {
+		if err != nil && err == bolt.ErrBucketNotFound {
 			return nil
 		}
 
@@ -208,6 +208,29 @@ func (d *boltDbDatabase) RemoveBucket(bucket string) error {
 
 	if err != nil {
 		Logger.Error("Error updating DB", zap.Error(err))
+		return err
+	}
+
+	return nil
+}
+
+func (d *boltDbDatabase) RemoveDBFile() error {
+
+	Logger.Debug("Removing BoltDB file")
+
+	if dbBolt == nil {
+		Logger.Error("BoltDB instance is nil")
+	}
+
+	err := dbBolt.Close()
+	if err != nil {
+		Logger.Error("Error closing BoltDB", zap.Error(err))
+		return err
+	}
+
+	err = os.Remove(internalConfig.Database.BoltDB.FileName)
+	if err != nil {
+		Logger.Error("Error removing BoltDB file", zap.Error(err))
 		return err
 	}
 

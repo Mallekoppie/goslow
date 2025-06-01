@@ -64,10 +64,10 @@ platform:
     componentname: Unit Test
   database:
     boltdb:
-      enabled: false
+      enabled: true
       filename: ./bolt.db
   vault:
-    enabled: true
+    enabled: false
     addresslist:
       - 'http://localhost:8200'
     InsecureSkipVerify: true

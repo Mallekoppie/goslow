@@ -50,3 +50,40 @@ type testObject struct {
 	Name    string
 	Surname string
 }
+
+func TestDBCleanup(t *testing.T) {
+
+	var testItem = testObject{
+		Id:      "testItem",
+		Name:    "Test Name",
+		Surname: "Test Surname",
+	}
+
+	err := Database.BoltDb.SaveObject("test", "testItem", testItem)
+	if err != nil {
+		log.Println("Error saving test item: ", err.Error())
+		t.Fail()
+	}
+
+	var resultObject = testObject{}
+	err = Database.BoltDb.ReadObject("test", "testItem", &resultObject)
+	if err != nil {
+		log.Println("Error reading test item: ", err.Error())
+		t.Fail()
+	}
+	if resultObject.Id != "testItem" {
+		log.Println("Test item not found in DB")
+		t.Fail()
+	}
+
+	err = Database.BoltDb.RemoveDBFile()
+	if err != nil {
+		log.Println("Error removing DB file: ", err.Error())
+		t.Fail()
+	}
+	if _, err := os.Stat(internalConfig.Database.BoltDB.FileName); !os.IsNotExist(err) {
+		log.Println("DB file still exists after cleanup")
+		t.Fail()
+	}
+
+}
