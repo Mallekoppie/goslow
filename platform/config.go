@@ -91,8 +91,9 @@ func GetComponentConfiguration(key string, object interface{}) error {
 // Config ... Platform configuration
 type config struct {
 	Log struct {
-		Level    string
-		FilePath string
+		Level              string
+		FileLoggingEnabled bool
+		FilePath           string
 		//MegaBytes
 		MaxSize    int
 		MaxBackups int
@@ -227,6 +228,7 @@ func createDefaultConfiguration() {
 	internalConfig.Log.Level = "info"
 	internalConfig.Log.MaxSize = 100
 	internalConfig.Log.MaxBackups = 5
+	internalConfig.Log.FileLoggingEnabled = false
 	internalConfig.Log.FilePath = "./default.log"
 	internalConfig.Database.BoltDB.Enabled = false
 	internalConfig.Component.ComponentName = "Not Specified"

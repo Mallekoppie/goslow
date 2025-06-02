@@ -3,6 +3,7 @@ package platform
 import (
 	"errors"
 	"log"
+	"os"
 	"strings"
 	"sync"
 
@@ -32,41 +33,41 @@ func InitializeLogger() {
 				log.Println("Unable to get Platform configuration: ", err.Error())
 				panic(err.Error())
 			}
-			//config := zap.NewProductionConfig()
-			//config.InitialFields = make(map[string]interface{}, 0)
-			//config.InitialFields["component"] = platformConfig.Component.ComponentName
 
 			logLevel, err := logLevelStringToZapType(platformConfig.Log.Level)
 			if err != nil {
 				log.Fatalln("Unable to convert config log level to internal log level: ", err.Error())
 			}
 
-			//config.Level = logLevel
-			//config.OutputPaths = []string{"stderr", platformConfig.Log.FilePath}
-			//config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-
 			// Log Rotation
-			syncWriter := zapcore.AddSync(&lumberjack.Logger{
+			fileWriter := zapcore.AddSync(&lumberjack.Logger{
 				Filename:   platformConfig.Log.FilePath,
 				MaxSize:    platformConfig.Log.MaxSize,
 				MaxAge:     platformConfig.Log.MaxAge,
 				MaxBackups: platformConfig.Log.MaxBackups,
 			})
-			encoder := zap.NewProductionEncoderConfig()
-			encoder.EncodeTime = zapcore.ISO8601TimeEncoder
-			core := zapcore.NewCore(zapcore.NewJSONEncoder(encoder), syncWriter, logLevel)
-			newLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
+
+			consoleWriter := zapcore.Lock(os.Stdout)
+
+			encoderConfig := zap.NewProductionEncoderConfig()
+			encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+			jsonEncoder := zapcore.NewJSONEncoder(encoderConfig)
+
+			zapCores := []zapcore.Core{}
+			// Only log to file if file logging is enabled
+			if platformConfig.Log.FileLoggingEnabled {
+				zapCores = append(zapCores, zapcore.NewCore(jsonEncoder, fileWriter, logLevel))
+			}
+			zapCores = append(zapCores, zapcore.NewCore(jsonEncoder, consoleWriter, logLevel))
+
+			coreTree := zapcore.NewTee(zapCores...)
+
+			newLogger := zap.New(coreTree, zap.AddCaller(), zap.AddCallerSkip(1))
 			newLogger = newLogger.With(zap.Field{
 				Key:    "component",
 				Type:   zapcore.StringType,
 				String: platformConfig.Component.ComponentName,
 			})
-
-			//newLogger, err := config.Build()
-			//if err != nil {
-			//	log.Println("Error while building logger: ", err.Error())
-			//	panic(err.Error())
-			//}
 
 			Logger = newLogger
 		} else {

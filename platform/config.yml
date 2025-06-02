@@ -2,6 +2,7 @@ platform:
   log:
     level: debug
     filepath: ./log.txt
+    FileLoggingEnabled: false
 #    megabytes
     MaxSize: 1024
     MaxBackups: 10
