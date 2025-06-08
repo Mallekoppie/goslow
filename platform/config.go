@@ -121,6 +121,14 @@ type config struct {
 				ClientID          string
 				AllowedAlgorithms []string
 			}
+			// If you have a proper IDP use OAuth and if you just want local tokens use LocalJwt
+			LocalJwt struct {
+				Enabled       bool
+				JwtSigningKey string
+				// JWT signing method, e.g., "HS256", "HS384", "HS512"
+				JwtSigningMethod string
+				JwtExpiration    int64 // In Minutes
+			}
 
 			Basic struct {
 				Enabled      bool

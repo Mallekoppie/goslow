@@ -18,3 +18,4 @@ platform/bolt.db
 log.txt
 *.exe
 /example/http-web-server/log.log
+example/localJwt/localJwt

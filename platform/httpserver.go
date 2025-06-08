@@ -29,15 +29,19 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 		// TODO: Check if enabled before adding these
 		handler = loggingMiddleware(handler, route.SlaMs)
 
-		if conf.Auth.Server.Basic.Enabled {
+		if conf.Auth.Server.Basic.Enabled && route.AuthRequired {
 			handler = basicAuthMiddleware(handler, conf.Auth.Server.Basic.AllowedUsers)
 		}
 
-		if conf.Auth.Server.OAuth.Enabled {
+		if conf.Auth.Server.OAuth.Enabled && route.AuthRequired {
 			handler = oAuth2Middleware(handler, route.RolesRequired)
 		}
 
-		if conf.HTTP.Server.AllowCorsForLocalDevelopment == true {
+		if conf.Auth.Server.LocalJwt.Enabled && route.AuthRequired {
+			handler = localJwtAuthMiddleware(handler)
+		}
+
+		if conf.HTTP.Server.AllowCorsForLocalDevelopment {
 			handler = AllowCorsForLocalDevelopment(handler)
 		}
 
@@ -110,6 +114,7 @@ type Route struct {
 	SlaMs              int64
 	RolesRequired      []string
 	AllowedContentType string
+	AuthRequired       bool
 }
 
 type Routes []Route

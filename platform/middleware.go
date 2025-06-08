@@ -16,6 +16,7 @@ const (
 	ContextOAuthClientToken       string = "OAuthClientToken"
 	ContextOAuthPreferredUsername string = "OAuthPreferredUsername"
 	ContextOAuthIssuer            string = "OAuthIssuer"
+	ContextLocalJwtClaims         string = "LocalJwtClaims"
 )
 
 type responseWriter struct {
@@ -237,5 +238,34 @@ func AllowCorsForLocalDevelopment(inner http.Handler) http.Handler {
 		w.Header().Add("Access-Control-Allow-Headers", "*")
 
 		inner.ServeHTTP(w, r)
+	})
+}
+
+func localJwtAuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			Logger.Error("Authorization header is missing")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		tokenString := authHeader[len("Bearer "):]
+		if tokenString == "" {
+			Logger.Error("Bearer token is missing in Authorization header")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		claims, err := LocalJwt.ValidateLocalJwtToken(tokenString)
+		if err != nil {
+			Logger.Error("Token validation failed", zap.Error(err))
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		ctx := r.Context()
+		ctx = context.WithValue(ctx, ContextLocalJwtClaims, claims)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

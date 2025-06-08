@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/dgrijalva/jwt-go"
-	"github.com/lestrrat/go-jwx/jwk"
-	"go.uber.org/zap"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/dgrijalva/jwt-go"
+	"github.com/lestrrat/go-jwx/jwk"
+	"go.uber.org/zap"
 )
 
 var (

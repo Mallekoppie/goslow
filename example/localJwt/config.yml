@@ -1,0 +1,24 @@
+platform:
+  component:
+    componentname: Example Web platform service
+  log:
+    level: debug    
+    FileLoggingEnabled: false
+  http:
+    server:
+      listeningaddress: 0.0.0.0:8080
+      tlscertfilename: ""
+      tlskeyfilename: ""
+      tlsenabled: false
+  auth:
+    server:
+      LocalJwt:
+        enabled: true
+        JwtSigningKey: "my super secret key"
+        JwtSigningMethod: "HS256"
+        JwtExpiration: 1
+
+
+componentconfigexample:
+  name: my custom config
+  port: 9001
