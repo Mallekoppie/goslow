@@ -43,13 +43,24 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 
 		if conf.HTTP.Server.AllowCorsForLocalDevelopment {
 			handler = AllowCorsForLocalDevelopment(handler)
+
+			if route.Method != http.MethodOptions {
+				router.
+					Path(route.Path).
+					Methods(http.MethodOptions).
+					Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Add("Access-Control-Allow-Origin", "*")
+						w.Header().Add("Access-Control-Allow-Methods", "*")
+						w.Header().Add("Access-Control-Allow-Headers", "*")
+					}))
+			}
+
 		}
 
 		router.
 			Path(route.Path).
 			Methods(route.Method).
 			Handler(handler)
-
 	}
 
 	return router, nil

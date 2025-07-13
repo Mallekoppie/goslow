@@ -236,7 +236,6 @@ func AllowCorsForLocalDevelopment(inner http.Handler) http.Handler {
 		w.Header().Add("Access-Control-Allow-Origin", "*")
 		w.Header().Add("Access-Control-Allow-Methods", "*")
 		w.Header().Add("Access-Control-Allow-Headers", "*")
-		w.Header().Add("Access-Control-Allow-Credemtials", "*")
 
 		inner.ServeHTTP(w, r)
 	})
