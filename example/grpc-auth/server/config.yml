@@ -1,0 +1,17 @@
+platform:
+  component:
+    componentname: grpc-auth
+  log:
+    level: debug    
+    FileLoggingEnabled: false
+  auth:
+    server:
+      LocalJwt:
+        enabled: true
+        JwtSigningKey: "my super secret key"
+        JwtSigningMethod: "HS256"
+        JwtExpiration: 5
+
+componentconfigexample:
+  name: my custom config
+  port: 9001
