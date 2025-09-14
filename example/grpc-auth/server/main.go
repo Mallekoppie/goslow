@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
@@ -42,6 +43,8 @@ func (s *Server) Login(ctx context.Context, req *gen.LoginRequest) (*gen.LoginRe
 			return nil, status.Errorf(codes.Internal, "failed to create token")
 		}
 
+		platform.Logger.Info("Login successful", zap.String("user", req.Username))
+
 		return &gen.LoginResponse{Token: token, Success: true, Message: "login successful"}, nil
 	}
 	return nil, status.Errorf(codes.Unauthenticated, "invalid credentials")
@@ -55,7 +58,14 @@ func main() {
 		platform.Logger.Error("failed to listen", zap.Error(err))
 	}
 
+	creds, err := credentials.NewServerTLSFromFile("server.crt", "server.key")
+	if err != nil {
+		log.Fatalf("failed to load TLS credentials: %v", err)
+		platform.Logger.Error("failed to load TLS credentials", zap.Error(err))
+	}
+
 	serverOptions := []grpc.ServerOption{
+		grpc.Creds(creds),
 		grpc.ChainUnaryInterceptor(authInterceptor),
 		// grpc.UnaryInterceptor(authInterceptor),
 	}

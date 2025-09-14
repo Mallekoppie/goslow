@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
+	"log"
+	"os"
 	"time"
 
 	"grpc-client/gen"
@@ -11,14 +14,24 @@ import (
 	"golang.org/x/oauth2"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
 )
 
 func main() {
-	conn, err := grpc.NewClient("localhost:9001", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithInsecure())
+	certBytes, err := os.ReadFile("server.crt")
 	if err != nil {
-		platform.Logger.Error("failed to connect", zap.Error(err))
+		log.Fatalf("failed to read server certificate: %v", err)
+	}
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(certBytes) {
+		log.Fatalf("failed to append server certificate to pool")
+	}
+	creds := credentials.NewClientTLSFromCert(certPool, "localhost")
+
+	conn, err := grpc.NewClient("localhost:9001", grpc.WithTransportCredentials(creds))
+	if err != nil {
+		log.Fatalf("did not connect: %v", err)
 	}
 	defer conn.Close()
 

@@ -19,3 +19,7 @@ log.txt
 *.exe
 /example/http-web-server/log.log
 example/localJwt/localJwt
+*.crt
+*.key
+example/grpc-auth/client/client
+example/grpc-auth/server/server
