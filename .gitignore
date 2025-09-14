@@ -23,3 +23,5 @@ example/localJwt/localJwt
 *.key
 example/grpc-auth/client/client
 example/grpc-auth/server/server
+example/grpc-web-server/client/client
+example/grpc-web-server/server/server
