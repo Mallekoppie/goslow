@@ -31,7 +31,7 @@ func (s *Server) SayHello(ctx context.Context, req *gen.HelloRequest) (*gen.Hell
 func main() {
 
 	config := p.Config{}
-	config.Component.ComponentName = "grpc-auth"
+	config.Component.ComponentName = "grpc-web"
 	config.Grpc.Server.ListeningAddress = "127.0.0.1:9001"
 	config.Grpc.Server.TLSCertFileName = "server.crt"
 	config.Grpc.Server.TLSKeyFileName = "server.key"
