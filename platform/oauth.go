@@ -62,7 +62,7 @@ func initializeOAuthTokenClients() {
 			if internalConfig.Vault.Enabled && len(v.VaultPath) > 0 {
 				secrets, err := Vault.GetSecrets(v.VaultPath)
 				if err != nil {
-					Logger.Fatal("Unable to retrieve OAuth client configs from Vault", zap.String("vault_path", v.VaultPath),
+					Log.Error("Unable to retrieve OAuth client configs from Vault", zap.String("vault_path", v.VaultPath),
 						zap.String("config_id", v.ID),
 						zap.Error(err))
 				}
@@ -88,10 +88,10 @@ func autoRenewOAuth2Token(config clientTokenConfig) {
 	currentExpiryTime := time.Now().Add(-(time.Minute * 60))
 	for true {
 		if time.Since(currentExpiryTime).Minutes() > -(config.RenewCheckTimeMinutes) {
-			Logger.Info("Renewing token", zap.String("config_id", config.ID))
+			Log.Info("Renewing token", zap.String("config_id", config.ID))
 			auth2Token, err := internalGetOAuth2Token(config.ID)
 			if err != nil {
-				Logger.Error("Error getting token. Waiting before retrying", zap.Error(err))
+				Log.Error("Error getting token. Waiting before retrying", zap.Error(err))
 				time.Sleep(time.Second * 5)
 				continue
 			}
@@ -99,7 +99,7 @@ func autoRenewOAuth2Token(config clientTokenConfig) {
 			currentExpiryTime = getExpiryTimeFromToken(currentToken)
 			oAuthTokens[config.ID] = currentToken
 
-			Logger.Info("Token renewed", zap.String("config_id", config.ID), zap.Time("next_expiry", currentExpiryTime))
+			Log.Info("Token renewed", zap.String("config_id", config.ID), zap.Time("next_expiry", currentExpiryTime))
 		}
 
 		time.Sleep(time.Duration(config.RenewCheckIntervalSeconds) * time.Second)
@@ -136,10 +136,10 @@ func (o oAuthOrganiser) GetToken(id string) (accessToken string, err error) {
 	token := oAuthTokens[id]
 
 	if len(token) < 1 {
-		Logger.Error("No token in local cache", zap.String("config_id", id))
+		Log.Error("No token in local cache", zap.String("config_id", id))
 		auth2Token, err := internalGetOAuth2Token(id)
 		if err != nil {
-			Logger.Error("Unable to retrieve OAuth2 token from IDP", zap.String("config_id", id), zap.Error(err))
+			Log.Error("Unable to retrieve OAuth2 token from IDP", zap.String("config_id", id), zap.Error(err))
 			return "", err
 		}
 
@@ -159,7 +159,7 @@ func internalGetOAuth2Token(id string) (accessToken string, err error) {
 	}
 
 	if len(clientConfig.ID) < 1 {
-		Logger.Error("Found no OAuth2 client config", zap.String("config_id", id))
+		Log.Error("Found no OAuth2 client config", zap.String("config_id", id))
 	}
 
 	var url string
@@ -188,21 +188,21 @@ func internalGetOAuth2Token(id string) (accessToken string, err error) {
 
 	response, err := oAuthHttpClient.Do(request)
 	if err != nil {
-		Logger.Error("Error getting OAuth2 token from IDP", zap.String("config_id", id),
+		Log.Error("Error getting OAuth2 token from IDP", zap.String("config_id", id),
 			zap.Error(err))
 		return "", err
 	}
 	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		Logger.Error("Error reading response body from IDP", zap.String("config_id", id),
+		Log.Error("Error reading response body from IDP", zap.String("config_id", id),
 			zap.Error(err))
 
 		return "", err
 	}
 
 	if response.StatusCode != http.StatusOK {
-		Logger.Error("Received incorrect http response code when requesting token from IDP",
+		Log.Error("Received incorrect http response code when requesting token from IDP",
 			zap.String("config_id", id))
 
 		return "", ErrOAuthIncorrectIDPStatusCode
@@ -212,7 +212,7 @@ func internalGetOAuth2Token(id string) (accessToken string, err error) {
 
 	err = json.Unmarshal(body, &oauthResponse)
 	if err != nil {
-		Logger.Error("Error unmarshalling response from IDP", zap.String("config_id", id),
+		Log.Error("Error unmarshalling response from IDP", zap.String("config_id", id),
 			zap.Error(err))
 
 		return "", err
@@ -264,7 +264,7 @@ func (o oAuthOrganiser) ValidateClientToken(rawToken string) (parsedToken *jwt.T
 		return nil, fmt.Errorf("unable to find key %q", keyID)
 	})
 	if err != nil {
-		Logger.Error("Token Validation failed", zap.Error(err))
+		Log.Error("Token Validation failed", zap.Error(err))
 		return parsedToken, claims, err
 	}
 
@@ -277,21 +277,21 @@ func getJksUrl(issuerUrl string) (url string, err error) {
 
 	response, err := oAuthHttpClient.Get(fullPath)
 	if err != nil {
-		Logger.Error("Unable to call IDP Well Known configuration endpoint", zap.String("idp_issuer", issuerUrl),
+		Log.Error("Unable to call IDP Well Known configuration endpoint", zap.String("idp_issuer", issuerUrl),
 			zap.Error(err))
 		return "", err
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		Logger.Error("Incorrect response code from IDP Well Known url", zap.Int("status_code_expected", 200),
+		Log.Error("Incorrect response code from IDP Well Known url", zap.Int("status_code_expected", 200),
 			zap.Int("status_code_actual", response.StatusCode), zap.String("idp_issuer", issuerUrl))
 		return "", errors.New("incorrect response code. expected 200")
 	}
 
 	responseData, err := io.ReadAll(response.Body)
 	if err != nil {
-		Logger.Error("Error reading response body from IDP Well Known config", zap.String("idp_issuer", issuerUrl),
+		Log.Error("Error reading response body from IDP Well Known config", zap.String("idp_issuer", issuerUrl),
 			zap.Error(err))
 		return "", err
 	}
@@ -300,7 +300,7 @@ func getJksUrl(issuerUrl string) (url string, err error) {
 
 	err = json.Unmarshal(responseData, &responseBody)
 	if err != nil {
-		Logger.Error("Error unmarshalling IDP Well Known response body", zap.String("idp_issuer", issuerUrl),
+		Log.Error("Error unmarshalling IDP Well Known response body", zap.String("idp_issuer", issuerUrl),
 			zap.Error(err))
 		return "", err
 	}

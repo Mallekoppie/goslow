@@ -14,18 +14,39 @@ import (
 
 var (
 	internaLoggerlLock sync.Mutex
-	Logger             *zap.Logger
+
+	Log                *Logger
 	ErrInvalidLogLevel = errors.New("Incorrect Log level. Unable to translate to ZAP log level")
 )
+
+type Logger struct {
+	internalLogger *zap.Logger
+}
+
+func (l *Logger) Info(msg string, fields ...zap.Field) {
+	l.internalLogger.Info(msg, fields...)
+}
+
+func (l *Logger) Error(msg string, fields ...zap.Field) {
+	l.internalLogger.Error(msg, fields...)
+}
+
+func (l *Logger) Debug(msg string, fields ...zap.Field) {
+	l.internalLogger.Debug(msg, fields...)
+}
+
+func (l *Logger) Warn(msg string, fields ...zap.Field) {
+	l.internalLogger.Warn(msg, fields...)
+}
 
 func init() {
 	InitializeLogger()
 }
 
 func InitializeLogger() {
-	if Logger == nil {
+	if Log == nil {
 		internaLoggerlLock.Lock()
-		if Logger == nil {
+		if Log == nil {
 			log.Println("Creating new logger")
 
 			platformConfig, err := GetPlatformConfiguration()
@@ -69,7 +90,9 @@ func InitializeLogger() {
 				String: platformConfig.Component.ComponentName,
 			})
 
-			Logger = newLogger
+			Log = &Logger{
+				internalLogger: newLogger,
+			}
 		} else {
 			internaLoggerlLock.Unlock()
 		}

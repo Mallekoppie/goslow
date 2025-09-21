@@ -26,13 +26,13 @@ func (j *jsonMarshallerOrganizer) ReadJsonRequest(requestBody io.ReadCloser, out
 
 	data, err := ioutil.ReadAll(requestBody)
 	if err != nil {
-		Logger.Error("Error reading request body", zap.Error(err))
+		Log.Error("Error reading request body", zap.Error(err))
 		return err
 	}
 
 	err = json.Unmarshal(data, &outputType)
 	if err != nil {
-		Logger.Error("Error unmarshalling response", zap.Error(err))
+		Log.Error("Error unmarshalling response", zap.Error(err))
 		return err
 	}
 
@@ -42,7 +42,7 @@ func (j *jsonMarshallerOrganizer) ReadJsonRequest(requestBody io.ReadCloser, out
 func (j *jsonMarshallerOrganizer) WriteJsonResponse(w http.ResponseWriter, statuscode int, response interface{}) {
 	responseData, err := json.Marshal(response)
 	if err != nil {
-		Logger.Error("Unable to marshal response object", zap.Error(err))
+		Log.Error("Unable to marshal response object", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

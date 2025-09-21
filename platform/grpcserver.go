@@ -2,7 +2,11 @@ package platform
 
 import (
 	"context"
+	"embed"
+	"errors"
+	"io/fs"
 	"net"
+	"net/http"
 	"strings"
 
 	"go.uber.org/zap"
@@ -22,21 +26,33 @@ type GRPCService interface {
 	Register(server *grpc.Server)
 }
 
-func StartGrpcServer(services []GRPCService) {
+func StartGrpcServerWithWeb(services []GRPCService, webDirectoryName string, webAssets *embed.FS) {
 	InitializeLogger()
 
 	config, err := GetPlatformConfiguration()
 	if err != nil {
-		Logger.Fatal("Error reading platform configuration", zap.Error(err))
-		return
+		Log.Error("Error reading platform configuration", zap.Error(err))
+		panic(errors.New("Unable to read configuration file"))
 	}
 
 	conf := config.Grpc.Server
-	Logger.Info("Starting new GRPC server", zap.String("ListeningAddress", conf.ListeningAddress))
+	Log.Info("Starting new GRPC server", zap.String("ListeningAddress", conf.ListeningAddress))
 	lis, err := net.Listen("tcp", conf.ListeningAddress)
 	if err != nil {
-		Logger.Error("failed to listen", zap.Error(err))
+		Log.Error("failed to listen", zap.Error(err))
 		return
+	}
+
+	var uiHandler http.Handler
+	webEnabled := false
+
+	if len(webDirectoryName) > 0 {
+		webEnabled = true
+		uiFs, err := fs.Sub(webAssets, webDirectoryName)
+		if err != nil {
+			Log.Error("failed to create sub filesystem", zap.Error(err))
+		}
+		uiHandler = http.FileServer(http.FS(uiFs))
 	}
 
 	serverOptions := []grpc.ServerOption{}
@@ -44,7 +60,7 @@ func StartGrpcServer(services []GRPCService) {
 	if conf.TLSEnabled {
 		creds, err := credentials.NewServerTLSFromFile(conf.TLSCertFileName, conf.TLSKeyFileName)
 		if err != nil {
-			Logger.Error("failed to load TLS credentials for GRPC server", zap.Error(err))
+			Log.Error("failed to load TLS credentials for GRPC server", zap.Error(err))
 			return
 		}
 
@@ -62,17 +78,36 @@ func StartGrpcServer(services []GRPCService) {
 		service.Register(grpcServer)
 	}
 
-	if err := grpcServer.Serve(lis); err != nil {
-		Logger.Error("failed to serve", zap.Error(err))
-	}
+	mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Route gRPC requests to grpcServer
+		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+			grpcServer.ServeHTTP(w, r)
+			return
+		}
+		// Route everything else to UI
+		uiHandler.ServeHTTP(w, r)
+	})
 
+	if webEnabled {
+		if err := http.ServeTLS(lis, mux, conf.TLSCertFileName, conf.TLSKeyFileName); err != nil {
+			Log.Error("failed to serve web content", zap.Error(err))
+		}
+	} else {
+		if err := grpcServer.Serve(lis); err != nil {
+			Log.Error("failed to serve gRPC", zap.Error(err))
+		}
+	}
+}
+
+func StartGrpcServer(services []GRPCService) {
+	StartGrpcServerWithWeb(services, "", nil)
 }
 
 func grpcAuthInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
 	if len(internalConfig.Grpc.Server.UnAuthenticatedPaths) > 0 {
 		for _, path := range internalConfig.Grpc.Server.UnAuthenticatedPaths {
 			if path == info.FullMethod {
-				Logger.Info("Skipping auth for unauthenticated path", zap.String("path", path))
+				Log.Info("Skipping auth for unauthenticated path", zap.String("path", path))
 				return handler(ctx, req)
 			}
 		}
@@ -80,7 +115,7 @@ func grpcAuthInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInf
 
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		Logger.Error("Missing metadata in request")
+		Log.Error("Missing metadata in request")
 		return nil, ErrGRPCMissingMetadata
 	}
 
@@ -88,7 +123,7 @@ func grpcAuthInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInf
 	// See: https://godoc.org/google.golang.org/grpc/metadata#New
 	authorization := md["authorization"]
 	if len(authorization) < 1 {
-		Logger.Error("Missing authorization in metadata", zap.Any("metadata", md))
+		Log.Error("Missing authorization in metadata", zap.Any("metadata", md))
 		return nil, ErrGRPCInvalidToken
 	}
 	token := strings.TrimPrefix(authorization[0], "Bearer ")
@@ -97,14 +132,14 @@ func grpcAuthInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInf
 	// for a token matching an arbitrary string.
 	claims, err := LocalJwt.ValidateLocalJwtToken(token)
 	if err != nil {
-		Logger.Error("failed to validate GRPC token", zap.Error(err))
+		Log.Error("failed to validate GRPC token", zap.Error(err))
 		return false, ErrGRPCInvalidToken
 	}
 
 	// Store the claims in the context
 	ctx = context.WithValue(ctx, ContextLocalJwtClaims, claims)
 
-	Logger.Debug("Valid token")
+	Log.Debug("Valid token")
 	// Continue execution of handler after ensuring a valid token.
 	return handler(ctx, req)
 }

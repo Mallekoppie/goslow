@@ -33,14 +33,14 @@ func initializeVault() {
 		Vault = platformVault{}
 		config, err := GetPlatformConfiguration()
 		if err != nil {
-			Logger.Fatal("Error loading configuration in Vault initialization", zap.Error(err))
+			Log.Error("Error loading configuration in Vault initialization", zap.Error(err))
 		}
 
 		if config.Vault.Enabled {
 			vaultEnabled = true
 			err = setupVaultClients(config)
 			if err != nil {
-				Logger.Fatal("Unable to create vault client during initialization", zap.Error(err))
+				Log.Error("Unable to create vault client during initialization", zap.Error(err))
 			}
 		} else {
 			vaultEnabled = false
@@ -79,7 +79,7 @@ func createVaultClient(address string, config *Config) (client *vaultapi.Client,
 	vaultConfig.ConfigureTLS(vaultTlsConfig)
 	client, err = vaultapi.NewClient(vaultConfig)
 	if err != nil {
-		Logger.Error("Error creating new Vault client", zap.Error(err))
+		Log.Error("Error creating new Vault client", zap.Error(err))
 		return client, err
 	}
 
@@ -87,7 +87,7 @@ func createVaultClient(address string, config *Config) (client *vaultapi.Client,
 		if len(config.Vault.Token.TokenPath) > 0 {
 			tokenValue, err := ioutil.ReadFile(config.Vault.Token.TokenPath)
 			if err != nil {
-				Logger.Fatal("Unable to read contents of token file", zap.Error(err))
+				Log.Error("Unable to read contents of token file", zap.Error(err))
 			}
 			client.SetToken(string(tokenValue))
 		} else {
@@ -99,7 +99,7 @@ func createVaultClient(address string, config *Config) (client *vaultapi.Client,
 }
 
 func setupVaultClients(config *Config) error {
-	Logger.Debug("Creating new Vault Clients")
+	Log.Debug("Creating new Vault Clients")
 
 	vaultClientList = make([]*vaultapi.Client, 0)
 
@@ -139,13 +139,13 @@ func (v *platformVault) GetSecrets(path string) (secrets map[string]string, err 
 		if internalConfig.Vault.Token.Enabled {
 			secretResult, err := c.Logical().Read(path)
 			if err != nil {
-				Logger.Error("Error retrieving secret with token", zap.Error(err), zap.String("address", c.Address()))
+				Log.Error("Error retrieving secret with token", zap.Error(err), zap.String("address", c.Address()))
 				continue
 			}
 			if secretResult != nil && secretResult.Data != nil {
 				secrets = processVaultSecretResponse(secretResult.Data)
 			} else {
-				Logger.Error("Result from retrieving secret from vault is nil")
+				Log.Error("Result from retrieving secret from vault is nil")
 				continue
 			}
 
@@ -154,18 +154,18 @@ func (v *platformVault) GetSecrets(path string) (secrets map[string]string, err 
 			request := c.NewRequest("POST", "/v1/auth/cert/login")
 			response, err := c.RawRequest(request)
 			if err != nil {
-				Logger.Error("Error loging in to Vault with cert to get token", zap.Error(err))
+				Log.Error("Error loging in to Vault with cert to get token", zap.Error(err))
 				continue
 			}
 
 			if response.StatusCode != http.StatusOK {
-				Logger.Error("Incorrect responsecode from Vault when logging in with Cert", zap.Int("response_code", response.StatusCode))
+				Log.Error("Incorrect responsecode from Vault when logging in with Cert", zap.Int("response_code", response.StatusCode))
 				continue
 			}
 			defer response.Body.Close()
 			responseData, err := ioutil.ReadAll(response.Body)
 			if err != nil {
-				Logger.Error("Error reading login response using cert to Vault", zap.Error(err))
+				Log.Error("Error reading login response using cert to Vault", zap.Error(err))
 				continue
 			}
 
@@ -173,7 +173,7 @@ func (v *platformVault) GetSecrets(path string) (secrets map[string]string, err 
 
 			err = json.Unmarshal(responseData, &responseModel)
 			if err != nil {
-				Logger.Error("Unable too unmarshal response from vault login", zap.Error(err))
+				Log.Error("Unable too unmarshal response from vault login", zap.Error(err))
 				continue
 			}
 
@@ -181,14 +181,14 @@ func (v *platformVault) GetSecrets(path string) (secrets map[string]string, err 
 
 			secretResult, err := c.Logical().Read(path)
 			if err != nil {
-				Logger.Error("Error reading secrets from Vault using cert auth method", zap.Error(err))
+				Log.Error("Error reading secrets from Vault using cert auth method", zap.Error(err))
 				continue
 			}
 
 			if secretResult != nil && secretResult.Data != nil {
 				secrets = processVaultSecretResponse(secretResult.Data)
 			} else {
-				Logger.Error("Result from retrieving secret from vault is nil")
+				Log.Error("Result from retrieving secret from vault is nil")
 				continue
 			}
 

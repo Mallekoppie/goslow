@@ -89,7 +89,7 @@ func GetPlatformConfiguration() (*Config, error) {
 func GetComponentConfiguration(key string, object interface{}) error {
 	err := viper.UnmarshalKey(key, &object)
 	if err != nil {
-		Logger.Error("Unable to read component configuration", zap.String("configkey", key), zap.Error(err))
+		Log.Error("Unable to read component configuration", zap.String("configkey", key), zap.Error(err))
 		return err
 	}
 
