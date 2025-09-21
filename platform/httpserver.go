@@ -13,7 +13,7 @@ import (
 func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 	router := mux.NewRouter().StrictSlash(true)
 
-	conf, err := getPlatformConfiguration()
+	conf, err := GetPlatformConfiguration()
 	if err != nil {
 		return nil, err
 	}
@@ -66,11 +66,11 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 	return router, nil
 }
 
-func startHttpServerInternal(router *mux.Router) {
-	config, err := getPlatformConfiguration()
+func startHttpServerInternal(router *mux.Router) error {
+	config, err := GetPlatformConfiguration()
 	if err != nil {
-		Logger.Error("Error reading platform configuration", zap.Error(err))
-		return
+		Log.Error("Error reading platform configuration", zap.Error(err))
+		return err
 	}
 
 	// Do this for each database we add
@@ -78,34 +78,37 @@ func startHttpServerInternal(router *mux.Router) {
 		defer Database.BoltDb.Close()
 	}
 
-	Logger.Info("Starting new HTTP server", zap.String("ListeingAddress", config.HTTP.Server.ListeningAddress))
+	Log.Info("Starting new HTTP server", zap.String("ListeingAddress", config.HTTP.Server.ListeningAddress))
 	if config.HTTP.Server.TLSEnabled {
-		Logger.Error("TLS Server stopped: ", zap.Error(
+		Log.Error("TLS Server stopped: ", zap.Error(
 			http.ListenAndServeTLS(config.HTTP.Server.ListeningAddress,
 				config.HTTP.Server.TLSCertFileName,
 				config.HTTP.Server.TLSKeyFileName,
 				router)))
 	} else {
-		Logger.Error("HTTP Server stopped: ", zap.Error(
+		Log.Error("HTTP Server stopped: ", zap.Error(
 			http.ListenAndServe(config.HTTP.Server.ListeningAddress, router)))
 	}
+
+	return nil
 }
 
-func StartHttpServer(routes Routes) {
+func StartHttpServer(routes Routes) error {
 	router, err := newRouter(routes)
 	if err != nil {
-		Logger.Fatal("Error starting HTTP server", zap.Error(err))
-		return
+		Log.Error("Error starting HTTP server", zap.Error(err))
+		return err
 	}
 
-	startHttpServerInternal(router)
+	return startHttpServerInternal(router)
 }
 
-func StartHttpServerWithHtmlHosting(routes Routes, dist embed.FS) {
+// Deprecated: Use StartHttpServerWithWeb
+func StartHttpServerWithHtmlHosting(routes Routes, dist embed.FS) error {
 	router, err := newRouter(routes)
 	if err != nil {
-		Logger.Fatal("Error starting HTTP server", zap.Error(err))
-		return
+		Log.Error("Error starting HTTP server", zap.Error(err))
+		return err
 	}
 
 	stripped, err := fs.Sub(dist, "dist")
@@ -115,7 +118,24 @@ func StartHttpServerWithHtmlHosting(routes Routes, dist embed.FS) {
 	fileServer := http.FileServer(http.FS(stripped))
 	router.PathPrefix("/").Handler(fileServer)
 
-	startHttpServerInternal(router)
+	return startHttpServerInternal(router)
+}
+
+func StartHttpServerWithWeb(routes Routes, dist embed.FS) error {
+	router, err := newRouter(routes)
+	if err != nil {
+		Log.Error("Error starting HTTP server", zap.Error(err))
+		return err
+	}
+
+	stripped, err := fs.Sub(dist, "dist")
+	if err != nil {
+		fmt.Println("Error stripping frontend")
+	}
+	fileServer := http.FileServer(http.FS(stripped))
+	router.PathPrefix("/").Handler(fileServer)
+
+	return startHttpServerInternal(router)
 }
 
 type Route struct {

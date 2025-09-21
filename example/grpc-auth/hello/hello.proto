@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+option go_package = "/gen";
+
+package gen;
+
+service HelloService {
+    rpc Login(LoginRequest) returns (LoginResponse);
+    rpc SayHello(HelloRequest) returns (HelloResponse);
+}
+
+message HelloRequest {
+    string Name = 1;
+}
+
+message HelloResponse {
+    string Result = 1;
+}
+
+message LoginRequest {
+    string Username = 1;
+    string Password = 2;
+}
+
+message LoginResponse {
+    string Token = 1;
+    string Message = 2;
+    bool Success = 3;
+}

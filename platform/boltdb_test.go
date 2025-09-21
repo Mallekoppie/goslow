@@ -24,7 +24,7 @@ func TestStoreAndReadObjectInBoltDB(t *testing.T) {
 		Surname: "Test surname",
 	}
 
-	Logger.Debug("Calling SaveObject from test")
+	Log.Debug("Calling SaveObject from test")
 	err := Database.BoltDb.SaveObject("test", id, initailobject)
 	if err != nil {
 		log.Println("Error saving object: ", err.Error())

@@ -2,66 +2,67 @@ package service
 
 import (
 	"bytes"
-	"github.com/Mallekoppie/goslow/example/http-api-server/model"
 	"net/http"
 
-	"github.com/Mallekoppie/goslow/platform"
+	"github.com/Mallekoppie/goslow/example/http-api-server/model"
+
+	p "github.com/Mallekoppie/goslow/platform"
 	"go.uber.org/zap"
 )
 
 func HelloWorld(w http.ResponseWriter, r *http.Request) {
-	platform.Logger.Info("We arrived at a new world!!!!")
+	p.Log.Info("We arrived at a new world!!!!")
 
 	w.Write([]byte("Hello World"))
 }
 
 func WriteObject(w http.ResponseWriter, r *http.Request) {
-	platform.Logger.Info("Writing object")
+	p.Log.Info("Writing object")
 
 	testobject := DBTestObject{}
 
-	err := platform.JsonMarshaller.ReadJsonRequest(r.Body, &testobject)
+	err := p.JsonMarshaller.ReadJsonRequest(r.Body, &testobject)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	platform.Logger.Info("Incoming object id", zap.String("id", testobject.Id))
+	p.Log.Info("Incoming object id", zap.String("id", testobject.Id))
 
-	err = platform.Database.BoltDb.SaveObject("test", testobject.Id, testobject)
+	err = p.Database.BoltDb.SaveObject("test", testobject.Id, testobject)
 	if err != nil {
-		platform.Logger.Error("Error saving object", zap.Error(err))
+		p.Log.Error("Error saving object", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 }
 
 func ReadObject(w http.ResponseWriter, r *http.Request) {
-	platform.Logger.Info("Writing object")
+	p.Log.Info("Writing object")
 
 	testobject := DBTestObject{}
 
-	err := platform.JsonMarshaller.ReadJsonRequest(r.Body, &testobject)
+	err := p.JsonMarshaller.ReadJsonRequest(r.Body, &testobject)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
 	resultObject := DBTestObject{}
-	err = platform.Database.BoltDb.ReadObject("test", testobject.Id, &resultObject)
+	err = p.Database.BoltDb.ReadObject("test", testobject.Id, &resultObject)
 	if err != nil {
-		if err == platform.ErrNoEntryFoundInDB {
+		if err == p.ErrNoEntryFoundInDB {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		} else {
-			platform.Logger.Error("Error reading objet", zap.Error(err))
+			p.Log.Error("Error reading object", zap.Error(err))
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
 	}
 
-	platform.JsonMarshaller.WriteJsonResponse(w, http.StatusOK, resultObject)
+	p.JsonMarshaller.WriteJsonResponse(w, http.StatusOK, resultObject)
 }
 
 type DBTestObject struct {
@@ -73,21 +74,21 @@ type DBTestObject struct {
 func GetConfiguration(w http.ResponseWriter, r *http.Request) {
 	conf := model.Config{}
 
-	err := platform.GetComponentConfiguration("componentconfigexample", &conf)
+	err := p.GetComponentConfiguration("componentconfigexample", &conf)
 	if err != nil {
-		platform.Logger.Error("Error reading component configuration", zap.Error(err))
+		p.Log.Error("Error reading component configuration", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	platform.JsonMarshaller.WriteJsonResponse(w, http.StatusOK, conf)
+	p.JsonMarshaller.WriteJsonResponse(w, http.StatusOK, conf)
 }
 
 func ReadAll(w http.ResponseWriter, r *http.Request) {
 
-	results, err := platform.Database.BoltDb.ReadAllObjects("test")
+	results, err := p.Database.BoltDb.ReadAllObjects("test")
 	if err != nil {
-		platform.Logger.Error("Error getting all objects", zap.Error(err))
+		p.Log.Error("Error getting all objects", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -104,7 +105,7 @@ func ReadAll(w http.ResponseWriter, r *http.Request) {
 
 func GetSecrets(w http.ResponseWriter, r *http.Request) {
 
-	secrets, err := platform.Vault.GetSecrets("kv-v2/data/dev/test/creds")
+	secrets, err := p.Vault.GetSecrets("kv-v2/data/dev/test/creds")
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -115,7 +116,7 @@ func GetSecrets(w http.ResponseWriter, r *http.Request) {
 		Password: secrets["password"],
 	}
 
-	platform.JsonMarshaller.WriteJsonResponse(w, 200, response)
+	p.JsonMarshaller.WriteJsonResponse(w, 200, response)
 }
 
 type GetSecretResponse struct {

@@ -2,6 +2,7 @@ package platform
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 
 	"github.com/boltdb/bolt"
@@ -9,13 +10,14 @@ import (
 )
 
 var (
-	dbBolt *bolt.DB
+	dbBolt              *bolt.DB
+	ErrBoltDBNoDBObject = errors.New("no db object")
 )
 
 type boltDbDatabase struct {
 }
 
-func databaseHackToRestartServiceIKnowThisIsBad(conf *config) {
+func databaseHackToRestartServiceIKnowThisIsBad(conf *Config) {
 	os.Chmod(conf.Database.BoltDB.FileName, 0755)
 	os.Remove(conf.Database.BoltDB.FileName + ".lock")
 
@@ -27,18 +29,19 @@ func init() {
 	// Its too late
 	InitializeLogger()
 
-	Logger.Debug("Creating boltdb")
-	config, err := getPlatformConfiguration()
+	Log.Debug("Creating boltdb")
+	config, err := GetPlatformConfiguration()
 	if err != nil {
-		Logger.Fatal("Unable to read platform configuration", zap.Error(err))
+		Log.Error("Unable to read platform configuration", zap.Error(err))
+		panic(errors.New("unable to get configuration"))
 	}
-	Logger.Debug("Config read completed")
+	Log.Debug("Config read completed")
 	if config.Database.BoltDB.Enabled == false {
-		Logger.Info("Database BoltDb not enabled")
+		Log.Info("Database BoltDb not enabled")
 		return
 	}
 
-	Logger.Debug("Calling open database",
+	Log.Debug("Calling open database",
 		zap.String("filename", config.Database.BoltDB.FileName))
 
 	// Hack to make the DB file writeable
@@ -46,10 +49,11 @@ func init() {
 
 	dbBolt, err = bolt.Open(config.Database.BoltDB.FileName, os.ModeExclusive, nil)
 	if err != nil {
-		Logger.Fatal("Error opening database", zap.Error(err))
+		Log.Error("Error opening database", zap.Error(err))
+		panic(errors.New("Unable to open db file"))
 	}
 
-	Logger.Debug("Boltdb created without error")
+	Log.Debug("Boltdb created without error")
 }
 
 func (d *boltDbDatabase) Close() error {
@@ -58,31 +62,32 @@ func (d *boltDbDatabase) Close() error {
 
 func (d *boltDbDatabase) SaveObject(bucket string, id string, object interface{}) error {
 
-	Logger.Debug("Saving object to DB",
+	Log.Debug("Saving object to DB",
 		zap.String("bucket", bucket),
 		zap.String("id", id),
 		zap.Any("object", object))
 
 	if dbBolt == nil {
-		Logger.Fatal("BoltDB instance is nil")
+		Log.Error("BoltDB instance is nil")
+		return ErrBoltDBNoDBObject
 	}
 
 	err := dbBolt.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
 		if err != nil {
-			Logger.Error("Error creating bucket", zap.Error(err))
+			Log.Error("Error creating bucket", zap.Error(err))
 			return err
 		}
 
 		data, err := json.Marshal(object)
 		if err != nil {
-			Logger.Error("Error marshalling object", zap.Error(err))
+			Log.Error("Error marshalling object", zap.Error(err))
 			return err
 		}
 
 		err = b.Put([]byte(id), data)
 		if err != nil {
-			Logger.Error("Error adding data", zap.Error(err))
+			Log.Error("Error adding data", zap.Error(err))
 			return err
 		}
 
@@ -90,7 +95,7 @@ func (d *boltDbDatabase) SaveObject(bucket string, id string, object interface{}
 	})
 
 	if err != nil {
-		Logger.Error("Error updating DB", zap.Error(err))
+		Log.Error("Error updating DB", zap.Error(err))
 		return err
 	}
 
@@ -105,19 +110,19 @@ func (d *boltDbDatabase) ReadObject(bucket string, id string, object interface{}
 		if len(result) > 0 {
 			err := json.Unmarshal(result, &object)
 			if err != nil {
-				Logger.Error("Error marshalling DB response", zap.Error(err))
+				Log.Error("Error marshalling DB response", zap.Error(err))
 				return err
 			}
 
 		} else {
-			Logger.Warn("No entry found in the database", zap.String("id", id))
+			Log.Warn("No entry found in the database", zap.String("id", id))
 			return ErrNoEntryFoundInDB
 		}
 
 		return nil
 	})
 	if err != nil {
-		Logger.Error("Error readign from database", zap.Error(err))
+		Log.Error("Error readign from database", zap.Error(err))
 		return err
 	}
 
@@ -143,7 +148,7 @@ func (d *boltDbDatabase) ReadAllObjects(bucket string) (map[string]string, error
 		return nil
 	})
 	if err != nil {
-		Logger.Error("Error reading from database", zap.Error(err))
+		Log.Error("Error reading from database", zap.Error(err))
 		return results, err
 	}
 
@@ -152,31 +157,32 @@ func (d *boltDbDatabase) ReadAllObjects(bucket string) (map[string]string, error
 
 func (d *boltDbDatabase) RemoveObject(bucket string, id string) error {
 
-	Logger.Debug("Removing object from bucket",
+	Log.Debug("Removing object from bucket",
 		zap.String("bucket", bucket),
 		zap.String("id", id))
 
 	if dbBolt == nil {
-		Logger.Fatal("BoltDB instance is nil")
+		Log.Error("BoltDB instance is nil")
+		return ErrBoltDBNoDBObject
 	}
 
 	err := dbBolt.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
 		if err != nil {
-			Logger.Error("Error creating bucket", zap.Error(err))
+			Log.Error("Error creating bucket", zap.Error(err))
 			return err
 		}
 
 		err = b.Delete([]byte(id))
 		if err != nil {
-			Logger.Error("Error removing key from bucket", zap.String("id", id), zap.String("bucket", bucket))
+			Log.Error("Error removing key from bucket", zap.String("id", id), zap.String("bucket", bucket))
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		Logger.Error("Error updating DB", zap.Error(err))
+		Log.Error("Error updating DB", zap.Error(err))
 		return err
 	}
 
@@ -185,11 +191,12 @@ func (d *boltDbDatabase) RemoveObject(bucket string, id string) error {
 
 func (d *boltDbDatabase) RemoveBucket(bucket string) error {
 
-	Logger.Debug("Deleting bucket",
+	Log.Debug("Deleting bucket",
 		zap.String("bucket", bucket))
 
 	if dbBolt == nil {
-		Logger.Fatal("BoltDB instance is nil")
+		Log.Error("BoltDB instance is nil")
+		return ErrBoltDBNoDBObject
 	}
 
 	err := dbBolt.Update(func(tx *bolt.Tx) error {
@@ -199,7 +206,7 @@ func (d *boltDbDatabase) RemoveBucket(bucket string) error {
 		}
 
 		if err != nil {
-			Logger.Error("Error removing bucket", zap.Error(err))
+			Log.Error("Error removing bucket", zap.Error(err))
 			return err
 		}
 
@@ -207,7 +214,7 @@ func (d *boltDbDatabase) RemoveBucket(bucket string) error {
 	})
 
 	if err != nil {
-		Logger.Error("Error updating DB", zap.Error(err))
+		Log.Error("Error updating DB", zap.Error(err))
 		return err
 	}
 
@@ -216,21 +223,21 @@ func (d *boltDbDatabase) RemoveBucket(bucket string) error {
 
 func (d *boltDbDatabase) RemoveDBFile() error {
 
-	Logger.Debug("Removing BoltDB file")
+	Log.Debug("Removing BoltDB file")
 
 	if dbBolt == nil {
-		Logger.Error("BoltDB instance is nil")
+		Log.Error("BoltDB instance is nil")
 	}
 
 	err := dbBolt.Close()
 	if err != nil {
-		Logger.Error("Error closing BoltDB", zap.Error(err))
+		Log.Error("Error closing BoltDB", zap.Error(err))
 		return err
 	}
 
 	err = os.Remove(internalConfig.Database.BoltDB.FileName)
 	if err != nil {
-		Logger.Error("Error removing BoltDB file", zap.Error(err))
+		Log.Error("Error removing BoltDB file", zap.Error(err))
 		return err
 	}
 

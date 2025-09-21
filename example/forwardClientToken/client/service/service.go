@@ -1,16 +1,17 @@
 package service
 
 import (
-	"github.com/Mallekoppie/goslow/example/forwardClientToken/client/logic"
 	"net/http"
 
-	"github.com/Mallekoppie/goslow/platform"
+	"github.com/Mallekoppie/goslow/example/forwardClientToken/client/logic"
+
+	p "github.com/Mallekoppie/goslow/platform"
 )
 
 func HelloWorld(w http.ResponseWriter, r *http.Request) {
-	platform.Logger.Info("We arrived at a new world!!!!")
+	p.Log.Info("We arrived at a new world!!!!")
 
-	clientToken := r.Context().Value(platform.ContextOAuthClientToken).(string)
+	clientToken := r.Context().Value(p.ContextOAuthClientToken).(string)
 
 	if len(clientToken) < 1 {
 		w.WriteHeader(http.StatusBadRequest)
