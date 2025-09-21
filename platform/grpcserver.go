@@ -3,7 +3,6 @@ package platform
 import (
 	"context"
 	"embed"
-	"errors"
 	"io/fs"
 	"net"
 	"net/http"
@@ -32,7 +31,7 @@ func StartGrpcServerWithWeb(services []GRPCService, webDirectoryName string, web
 	config, err := GetPlatformConfiguration()
 	if err != nil {
 		Log.Error("Error reading platform configuration", zap.Error(err))
-		panic(errors.New("Unable to read configuration file"))
+		panic(err)
 	}
 
 	conf := config.Grpc.Server

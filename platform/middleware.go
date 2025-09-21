@@ -2,7 +2,6 @@ package platform
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -88,14 +87,14 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 	config, err := GetPlatformConfiguration()
 	if err != nil {
 		Log.Error("unable to load platform configuration", zap.Error(err))
-		panic(errors.New("Need platform config to setup middleware"))
+		panic(err)
 	}
 
 	ctx := context.Background()
 	provider, err := oidc.NewProvider(ctx, config.Auth.Server.OAuth.IdpWellKnownURL)
 	if err != nil {
 		Log.Error("Error communication with IDP provider", zap.Error(err), zap.String("provider_url", config.Auth.Server.OAuth.IdpWellKnownURL))
-		panic(errors.New("Need access to IDP well known configuration to setup middleware"))
+		panic(err)
 	}
 
 	oidcConfig := &oidc.Config{
