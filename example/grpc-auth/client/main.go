@@ -9,7 +9,7 @@ import (
 
 	"grpc-client/gen"
 
-	"github.com/Mallekoppie/goslow/platform"
+	p "github.com/Mallekoppie/goslow/platform"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 
@@ -42,23 +42,23 @@ func main() {
 
 	loginResponse, err := client.Login(ctx, &gen.LoginRequest{Username: "user", Password: "pass"})
 	if err != nil {
-		platform.Logger.Error("failed to login", zap.Error(err))
+		p.Log.Error("failed to login", zap.Error(err))
 		return
 	}
 	if loginResponse.Success {
-		platform.Logger.Info("Login successful", zap.String("token", loginResponse.Token))
+		p.Log.Info("Login successful", zap.String("token", loginResponse.Token))
 	} else {
-		platform.Logger.Error("Login failed", zap.String("message", loginResponse.Message))
+		p.Log.Error("Login failed", zap.String("message", loginResponse.Message))
 		return
 	}
 
 	callOption := grpc.PerRPCCredentials(oauth.TokenSource{TokenSource: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: loginResponse.Token})})
 	response, err := client.SayHello(ctx, &gen.HelloRequest{Name: "World"}, callOption)
 	if err != nil {
-		platform.Logger.Error("failed to say hello", zap.Error(err))
+		p.Log.Error("failed to say hello", zap.Error(err))
 		return
 	}
-	platform.Logger.Info("response received", zap.String("message", response.Result))
+	p.Log.Info("response received", zap.String("message", response.Result))
 
-	// platform.Logger.Info("response received", zap.String("message", response.Message))
+	// p.Log.Info("response received", zap.String("message", response.Message))
 }

@@ -2,9 +2,10 @@ package logic
 
 import (
 	"errors"
-	"github.com/Mallekoppie/goslow/platform"
-	"go.uber.org/zap"
 	"net/http"
+
+	p "github.com/Mallekoppie/goslow/platform"
+	"go.uber.org/zap"
 )
 
 var (
@@ -12,11 +13,17 @@ var (
 )
 
 func init() {
-	client = platform.CreateHttpClient("default")
+	c, err := p.CreateHttpClient("default")
+	if err != nil {
+		p.Log.Error("Error creating HTTP client", zap.Error(err))
+		panic(err)
+	}
+
+	client = c
 }
 
 func CallServer(clientToken string) error {
-	token, err := platform.OAuth.GetToken("default")
+	token, err := p.OAuth.GetToken("default")
 	if err != nil {
 		return err
 	}
@@ -31,7 +38,7 @@ func CallServer(clientToken string) error {
 
 	response, err := client.Do(request)
 	if err != nil {
-		platform.Logger.Error("Error calling server", zap.Error(err))
+		p.Log.Error("Error calling server", zap.Error(err))
 		return err
 	}
 
