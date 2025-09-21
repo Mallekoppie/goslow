@@ -41,7 +41,7 @@ import (
 
 func TestReadConfig(t *testing.T) {
 
-	config, err := getPlatformConfiguration()
+	config, err := GetPlatformConfiguration()
 	if err != nil {
 		t.Fail()
 	}

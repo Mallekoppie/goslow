@@ -21,16 +21,16 @@ gen-cert:
 	openssl req -x509 -newkey rsa:4096 -keyout $(KEY) -out $(CERT) -days 365 -nodes \
 		-subj "/CN=localhost" \
 		-addext "subjectAltName=DNS:localhost"
-
-run-server: build-server gen-cert
 	cp $(CERT) ./server/
 	cp $(KEY) ./server/
+	cp $(CERT) ./client/
+	cp $(KEY) ./client/
+
+run-server: build-server
 	cd ./server && ./server
 	
 
-run-client: build-client gen-cert
-	cp $(CERT) ./client/
-	cp $(KEY) ./client/
+run-client: build-client
 	./client/client
 
 clean:

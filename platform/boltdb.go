@@ -15,7 +15,7 @@ var (
 type boltDbDatabase struct {
 }
 
-func databaseHackToRestartServiceIKnowThisIsBad(conf *config) {
+func databaseHackToRestartServiceIKnowThisIsBad(conf *Config) {
 	os.Chmod(conf.Database.BoltDB.FileName, 0755)
 	os.Remove(conf.Database.BoltDB.FileName + ".lock")
 
@@ -28,7 +28,7 @@ func init() {
 	InitializeLogger()
 
 	Logger.Debug("Creating boltdb")
-	config, err := getPlatformConfiguration()
+	config, err := GetPlatformConfiguration()
 	if err != nil {
 		Logger.Fatal("Unable to read platform configuration", zap.Error(err))
 	}

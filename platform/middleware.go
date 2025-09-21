@@ -84,7 +84,7 @@ type customClaims struct {
 
 func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 
-	config, err := getPlatformConfiguration()
+	config, err := GetPlatformConfiguration()
 	if err != nil {
 		Logger.Fatal("unable to load platform configuration", zap.Error(err))
 	}

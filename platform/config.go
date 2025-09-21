@@ -12,12 +12,12 @@ import (
 )
 
 var (
-	internalConfig           *config
+	internalConfig           *Config
 	mutex                    sync.Mutex
 	ErrInvalidConfigFilePath = errors.New("Invalid config file path for settings platform.log.logfilepath")
 )
 
-func writePlatformConfiguration(conf config) error {
+func writePlatformConfiguration(conf Config) error {
 	viper.Set("platform", conf)
 
 	err := viper.WriteConfig()
@@ -29,7 +29,15 @@ func writePlatformConfiguration(conf config) error {
 	return nil
 }
 
-func getPlatformConfiguration() (*config, error) {
+func SetPlatformConfiguration(conf Config) {
+
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	internalConfig = &conf
+}
+
+func GetPlatformConfiguration() (*Config, error) {
 
 	if internalConfig == nil {
 		mutex.Lock()
@@ -89,7 +97,7 @@ func GetComponentConfiguration(key string, object interface{}) error {
 }
 
 // Config ... Platform configuration
-type config struct {
+type Config struct {
 	Log struct {
 		Level              string
 		FileLoggingEnabled bool
@@ -111,6 +119,18 @@ type config struct {
 		}
 
 		Clients []httpClientConfig
+	}
+
+	Grpc struct {
+		Server struct {
+			ListeningAddress string
+			TLSCertFileName  string
+			TLSKeyFileName   string
+			TLSEnabled       bool
+
+			// For things like login paths that wonth have security
+			UnAuthenticatedPaths []string
+		}
 	}
 
 	Auth struct {
@@ -208,7 +228,7 @@ type clientTokenConfig struct {
 	vaultEnabled               bool
 }
 
-func (conf *config) checkPlatformConfiguration() error {
+func (conf *Config) checkPlatformConfiguration() error {
 	if len(conf.Log.FilePath) < 1 {
 		log.Println("Configuration Log.FiePath is empty. Defaulting to ./default.log")
 		conf.Log.FilePath = "./default.log"
@@ -228,16 +248,12 @@ func (conf *config) checkPlatformConfiguration() error {
 }
 
 func createDefaultConfiguration() {
-	internalConfig = &config{}
+	internalConfig = &Config{}
 	internalConfig.Auth.Server.Basic.Enabled = false
 	internalConfig.Auth.Server.OAuth.Enabled = false
 	internalConfig.HTTP.Server.TLSEnabled = false
 	internalConfig.HTTP.Server.ListeningAddress = "127.0.0.1:10000"
-	internalConfig.Log.Level = "info"
-	internalConfig.Log.MaxSize = 100
-	internalConfig.Log.MaxBackups = 5
 	internalConfig.Log.FileLoggingEnabled = false
-	internalConfig.Log.FilePath = "./default.log"
 	internalConfig.Database.BoltDB.Enabled = false
 	internalConfig.Component.ComponentName = "Not Specified"
 }

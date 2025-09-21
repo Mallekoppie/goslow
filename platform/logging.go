@@ -28,7 +28,7 @@ func InitializeLogger() {
 		if Logger == nil {
 			log.Println("Creating new logger")
 
-			platformConfig, err := getPlatformConfiguration()
+			platformConfig, err := GetPlatformConfiguration()
 			if err != nil {
 				log.Println("Unable to get Platform configuration: ", err.Error())
 				panic(err.Error())
@@ -94,7 +94,7 @@ func logLevelStringToZapType(input string) (zap.AtomicLevel, error) {
 	case "panic":
 		result = zap.NewAtomicLevelAt(zap.PanicLevel)
 	default:
-		return result, ErrInvalidLogLevel
+		result = zap.NewAtomicLevelAt(zap.InfoLevel)
 	}
 
 	return result, nil

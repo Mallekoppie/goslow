@@ -3,11 +3,12 @@ package platform
 import (
 	"encoding/json"
 	"errors"
-	vaultapi "github.com/hashicorp/vault/api"
-	"go.uber.org/zap"
 	"io/ioutil"
 	"net/http"
 	"time"
+
+	vaultapi "github.com/hashicorp/vault/api"
+	"go.uber.org/zap"
 )
 
 var (
@@ -30,7 +31,7 @@ func init() {
 func initializeVault() {
 	if vaultInitialized == false {
 		Vault = platformVault{}
-		config, err := getPlatformConfiguration()
+		config, err := GetPlatformConfiguration()
 		if err != nil {
 			Logger.Fatal("Error loading configuration in Vault initialization", zap.Error(err))
 		}
@@ -50,7 +51,7 @@ func initializeVault() {
 
 }
 
-func createVaultClient(address string, config *config) (client *vaultapi.Client, err error) {
+func createVaultClient(address string, config *Config) (client *vaultapi.Client, err error) {
 	vaultConfig := &vaultapi.Config{
 		MaxRetries: config.Vault.MaxRetries,
 		Timeout:    time.Second * time.Duration(config.Vault.TimeoutSeconds),
@@ -97,7 +98,7 @@ func createVaultClient(address string, config *config) (client *vaultapi.Client,
 	return client, nil
 }
 
-func setupVaultClients(config *config) error {
+func setupVaultClients(config *Config) error {
 	Logger.Debug("Creating new Vault Clients")
 
 	vaultClientList = make([]*vaultapi.Client, 0)

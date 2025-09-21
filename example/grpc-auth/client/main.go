@@ -29,7 +29,7 @@ func main() {
 	}
 	creds := credentials.NewClientTLSFromCert(certPool, "localhost")
 
-	conn, err := grpc.NewClient("localhost:9001", grpc.WithTransportCredentials(creds))
+	conn, err := grpc.NewClient("127.0.0.1:9001", grpc.WithTransportCredentials(creds))
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
 	}

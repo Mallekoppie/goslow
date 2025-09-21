@@ -13,7 +13,7 @@ import (
 func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 	router := mux.NewRouter().StrictSlash(true)
 
-	conf, err := getPlatformConfiguration()
+	conf, err := GetPlatformConfiguration()
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 }
 
 func startHttpServerInternal(router *mux.Router) {
-	config, err := getPlatformConfiguration()
+	config, err := GetPlatformConfiguration()
 	if err != nil {
 		Logger.Error("Error reading platform configuration", zap.Error(err))
 		return
@@ -101,7 +101,25 @@ func StartHttpServer(routes Routes) {
 	startHttpServerInternal(router)
 }
 
+// Deprecated: Use StartHttpServerWithWeb
 func StartHttpServerWithHtmlHosting(routes Routes, dist embed.FS) {
+	router, err := newRouter(routes)
+	if err != nil {
+		Logger.Fatal("Error starting HTTP server", zap.Error(err))
+		return
+	}
+
+	stripped, err := fs.Sub(dist, "dist")
+	if err != nil {
+		fmt.Println("Error stripping frontend")
+	}
+	fileServer := http.FileServer(http.FS(stripped))
+	router.PathPrefix("/").Handler(fileServer)
+
+	startHttpServerInternal(router)
+}
+
+func StartHttpServerWithWeb(routes Routes, dist embed.FS) {
 	router, err := newRouter(routes)
 	if err != nil {
 		Logger.Fatal("Error starting HTTP server", zap.Error(err))
