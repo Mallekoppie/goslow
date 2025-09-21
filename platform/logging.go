@@ -16,7 +16,7 @@ var (
 	internaLoggerlLock sync.Mutex
 
 	Log                *Logger
-	ErrInvalidLogLevel = errors.New("Incorrect Log level. Unable to translate to ZAP log level")
+	ErrInvalidLogLevel = errors.New("incorrect log level: unable to translate to zap log level")
 )
 
 type Logger struct {
