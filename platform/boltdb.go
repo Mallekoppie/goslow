@@ -23,37 +23,30 @@ func databaseHackToRestartServiceIKnowThisIsBad(conf *Config) {
 
 }
 
-func init() {
-	// This is because this init method executes before the Logger.init() method
-	// Don't ask me why
-	// Its too late
-	InitializeLogger()
-
-	Log.Debug("Creating boltdb")
-	config, err := GetPlatformConfiguration()
-	if err != nil {
-		Log.Error("Unable to read platform configuration", zap.Error(err))
-		panic(errors.New("unable to get configuration"))
-	}
-	Log.Debug("Config read completed")
-	if config.Database.BoltDB.Enabled == false {
+// SetupBoltDB initializes BoltDB based on the platform configuration.
+// This function must be called explicitly before using any BoltDB functions.
+// Returns an error if BoltDB is not enabled in the configuration or if initialization fails.
+func SetupBoltDB() error {
+	if internalConfig.Database.BoltDB.Enabled == false {
 		Log.Info("Database BoltDb not enabled")
-		return
+		return errors.New("BoltDB is not enabled in configuration")
 	}
 
-	Log.Debug("Calling open database",
-		zap.String("filename", config.Database.BoltDB.FileName))
+	Log.Debug("Setting up BoltDB",
+		zap.String("filename", internalConfig.Database.BoltDB.FileName))
 
 	// Hack to make the DB file writeable
-	databaseHackToRestartServiceIKnowThisIsBad(config)
+	databaseHackToRestartServiceIKnowThisIsBad(internalConfig)
 
-	dbBolt, err = bolt.Open(config.Database.BoltDB.FileName, os.ModeExclusive, nil)
+	var err error
+	dbBolt, err = bolt.Open(internalConfig.Database.BoltDB.FileName, os.ModeExclusive, nil)
 	if err != nil {
 		Log.Error("Error opening database", zap.Error(err))
-		panic(errors.New("Unable to open db file"))
+		return err
 	}
 
-	Log.Debug("Boltdb created without error")
+	Log.Debug("BoltDB setup completed successfully")
+	return nil
 }
 
 func (d *boltDbDatabase) Close() error {
