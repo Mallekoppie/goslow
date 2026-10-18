@@ -145,6 +145,7 @@ type Route struct {
 	SlaMs              int64
 	RolesRequired      []string
 	AllowedContentType string
+	Auth               AuthStrategy
 	AuthRequired       bool
 }
 

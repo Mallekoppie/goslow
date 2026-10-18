@@ -62,7 +62,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/text")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(token))
-	platform.Logger.Info("User logged in successfully", zap.String("username", login.Username))
+	platform.Log.Info("User logged in successfully", zap.String("username", login.Username))
 
 }
 
@@ -73,24 +73,24 @@ func HandleQuery(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	result := ctx.Value(platform.ContextLocalJwtClaims)
 	if result == nil {
-		platform.Logger.Error("No JWT claims found in context")
+		platform.Log.Error("No JWT claims found in context")
 		w.Write([]byte("Query successful"))
 		return
 	}
 
 	resultMap, ok := result.(map[string]interface{})
 	if !ok {
-		platform.Logger.Error("Invalid JWT claims type in context")
+		platform.Log.Error("Invalid JWT claims type in context")
 		http.Error(w, "Invalid JWT claims", http.StatusInternalServerError)
 		return
 	}
 	username, ok := resultMap["username"].(string)
 	if !ok {
-		platform.Logger.Error("Username not found in JWT claims")
+		platform.Log.Error("Username not found in JWT claims")
 		http.Error(w, "Invalid JWT claims", http.StatusInternalServerError)
 		return
 	}
-	platform.Logger.Info("Query successful", zap.String("username", username))
+	platform.Log.Info("Query successful", zap.String("username", username))
 	w.Write([]byte("Query successful for user: " + username))
 
 }

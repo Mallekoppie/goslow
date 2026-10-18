@@ -33,45 +33,33 @@ func (rw *responseWriter) WriteHeader(code int) {
 	if rw.wroteHeader {
 		return
 	}
-
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
 	rw.wroteHeader = true
-
-	return
 }
 
 func (rw *responseWriter) Status() int {
 	if rw.status == 0 {
 		return 200
 	}
-
 	return rw.status
 }
 
 func loggingMiddleware(next http.Handler, slaMs int64) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-
 		wrapped := wrapResponseWriter(w)
 		next.ServeHTTP(wrapped, r)
-
 		difference := time.Since(start).Milliseconds()
-
-		Log.Info("Request completed",
-			zap.Int("statuscode", wrapped.Status()),
-			zap.String("method", r.Method),
-			zap.String("path", r.URL.EscapedPath()),
-			zap.Int64("duration", difference))
-
-		if slaMs > 0 {
-			if difference > slaMs {
-				Log.Warn("SLA contract exceeded",
-					zap.Int64("SLA", slaMs),
-					zap.String("method", r.Method),
-					zap.String("path", r.URL.EscapedPath()),
-					zap.Int64("duration", difference))
-			}
+		if Log != nil {
+			Log.Info("Request completed",
+				zap.Int("statuscode", wrapped.Status()),
+				zap.String("method", r.Method),
+				zap.String("path", r.URL.EscapedPath()),
+				zap.Int64("duration", difference))
+		}
+		if slaMs > 0 && difference > slaMs && Log != nil {
+			Log.Warn("SLA contract exceeded", zap.Int64("SLA", slaMs), zap.String("method", r.Method), zap.String("path", r.URL.EscapedPath()), zap.Int64("duration", difference))
 		}
 	})
 }
@@ -82,64 +70,75 @@ type customClaims struct {
 	PreferredUsername string   `json:"preferred_username,omitempty"`
 }
 
-func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
+func bearerToken(headerValue string) (string, bool) {
+	if strings.TrimSpace(headerValue) == "" {
+		return "", false
+	}
+	if !strings.HasPrefix(headerValue, "Bearer ") {
+		return "", false
+	}
+	token := strings.TrimSpace(headerValue[len("Bearer "):])
+	if token == "" {
+		return "", false
+	}
+	return token, true
+}
 
+func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 	config, err := GetPlatformConfiguration()
 	if err != nil {
-		Log.Error("unable to load platform configuration", zap.Error(err))
+		if Log != nil {
+			Log.Error("unable to load platform configuration", zap.Error(err))
+		}
 		panic(err)
 	}
-
 	ctx := context.Background()
 	provider, err := oidc.NewProvider(ctx, config.Auth.Server.OAuth.IdpWellKnownURL)
 	if err != nil {
-		Log.Error("Error communication with IDP provider", zap.Error(err), zap.String("provider_url", config.Auth.Server.OAuth.IdpWellKnownURL))
+		if Log != nil {
+			Log.Error("Error communication with IDP provider", zap.Error(err), zap.String("provider_url", config.Auth.Server.OAuth.IdpWellKnownURL))
+		}
 		panic(err)
 	}
-
-	oidcConfig := &oidc.Config{
-		ClientID: config.Auth.Server.OAuth.ClientID,
-	}
-	verifier := provider.Verifier(oidcConfig)
-
+	verifier := provider.Verifier(&oidc.Config{ClientID: config.Auth.Server.OAuth.ClientID})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
 		authorized := false
 		injectRolesToContext := make([]string, 0)
 		accessToken := ""
 		issuer := ""
 		preferredUsername := ""
-		// Only check the claims if a specific role is required for the path
 		if len(roles) > 0 {
 			authorized = false
 			rawAccessToken := r.Header.Get("Authorization")
-
 			if rawAccessToken == "" {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-
 			parts := strings.Split(rawAccessToken, " ")
 			if len(parts) != 2 {
-				Log.Error("Auth header not build correctly")
+				if Log != nil {
+					Log.Error("Auth header not built correctly")
+				}
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 			accessToken = parts[1]
 			idToken, err := verifier.Verify(ctx, parts[1])
 			if err != nil {
-				Log.Error("Token verification failed", zap.Error(err))
+				if Log != nil {
+					Log.Error("Token verification failed", zap.Error(err))
+				}
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
 			claims := customClaims{}
-			err = idToken.Claims(&claims)
-			if err != nil {
-				Log.Error("Unable to get claims", zap.Error(err))
+			if err := idToken.Claims(&claims); err != nil {
+				if Log != nil {
+					Log.Error("Unable to get claims", zap.Error(err))
+				}
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-
 			for neededIndex := range roles {
 				for tokenRoleIndex := range claims.Roles {
 					if roles[neededIndex] == claims.Roles[tokenRoleIndex] {
@@ -148,23 +147,16 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 					}
 				}
 			}
-
 			issuer = claims.Issuer
 			preferredUsername = claims.PreferredUsername
-
-			if authorized != true {
-				Log.Error("Required role not found",
-					zap.Strings("roles", roles),
-					zap.Strings("allowedRoles", claims.Roles),
-					zap.String("path", r.URL.EscapedPath()),
-					zap.String("method", r.Method))
+			if !authorized {
+				if Log != nil {
+					Log.Error("Required role not found", zap.Strings("roles", roles), zap.Strings("allowedRoles", claims.Roles), zap.String("path", r.URL.EscapedPath()), zap.String("method", r.Method))
+				}
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-
-			// TODO: Expand this with scopes
 		}
-
 		if authorized {
 			ctx := context.WithValue(r.Context(), ContextOAuthRoles, injectRolesToContext)
 			ctx = context.WithValue(ctx, ContextOAuthClientToken, accessToken)
@@ -176,19 +168,17 @@ func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
 }
 
 func allowedContentTypeMiddleware(inner http.Handler, contentTypeConfig string) http.Handler {
-
 	contentType := strings.ToLower(contentTypeConfig)
 	enabled := len(contentTypeConfig) > 0
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
 		if enabled {
 			result := r.Header.Get("Content-Type")
-
 			if strings.ToLower(result) == contentType {
 				inner.ServeHTTP(w, r)
 			} else {
-				Log.Error("Content type not allowed", zap.String("content-type", result))
+				if Log != nil {
+					Log.Error("Content type not allowed", zap.String("content-type", result))
+				}
 				w.WriteHeader(http.StatusUnsupportedMediaType)
 			}
 		} else {
@@ -197,48 +187,50 @@ func allowedContentTypeMiddleware(inner http.Handler, contentTypeConfig string) 
 	})
 }
 
-// Adds 75-80 ms to the response time...
 func basicAuthMiddleware(inner http.Handler, users map[string]string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		Log.Debug("Entered Basic Auth Middleware")
+		if Log != nil {
+			Log.Debug("Entered Basic Auth Middleware")
+		}
 		username, password, ok := r.BasicAuth()
 		if ok {
-			Log.Debug("Basic Auth returned ok")
+			if Log != nil {
+				Log.Debug("Basic Auth returned ok")
+			}
 			allowedPassword := users[username]
-			Log.Debug("Allowed password", zap.String("passwordhash", allowedPassword))
-
+			if Log != nil {
+				Log.Debug("Allowed password", zap.String("passwordhash", allowedPassword))
+			}
 			if len(allowedPassword) < 1 {
-				Log.Error("User not allowed")
+				if Log != nil {
+					Log.Error("User not allowed")
+				}
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-
 			compareError := bcrypt.CompareHashAndPassword([]byte(allowedPassword), []byte(password))
-
 			if compareError != nil {
-				Log.Error("Password incorrect", zap.Error(compareError))
+				if Log != nil {
+					Log.Error("Password incorrect", zap.Error(compareError))
+				}
 				w.WriteHeader(http.StatusUnauthorized)
 				return
-			} else {
-				inner.ServeHTTP(w, r)
 			}
-		} else {
-			Log.Error("Authorization header required")
-			w.WriteHeader(http.StatusUnauthorized)
+			inner.ServeHTTP(w, r)
+			return
 		}
+		if Log != nil {
+			Log.Error("Authorization header required")
+		}
+		w.WriteHeader(http.StatusUnauthorized)
 	})
 }
 
 func AllowCorsForLocalDevelopment(inner http.Handler) http.Handler {
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-		// This is bad. I'll add configuration later
-		// TODO: Add configuration
 		w.Header().Add("Access-Control-Allow-Origin", "*")
 		w.Header().Add("Access-Control-Allow-Methods", "*")
 		w.Header().Add("Access-Control-Allow-Headers", "*")
-
 		inner.ServeHTTP(w, r)
 	})
 }
@@ -247,27 +239,29 @@ func localJwtAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			Log.Error("Authorization header is missing")
+			if Log != nil {
+				Log.Error("Authorization header is missing")
+			}
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-
-		tokenString := authHeader[len("Bearer "):]
-		if tokenString == "" {
-			Log.Error("Bearer token is missing in Authorization header")
+		tokenString, ok := bearerToken(authHeader)
+		if !ok {
+			if Log != nil {
+				Log.Error("Bearer token is missing or malformed in Authorization header")
+			}
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-
 		claims, err := LocalJwt.ValidateLocalJwtToken(tokenString)
 		if err != nil {
-			Log.Error("Token validation failed", zap.Error(err))
+			if Log != nil {
+				Log.Error("Token validation failed", zap.Error(err))
+			}
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-
-		ctx := r.Context()
-		ctx = context.WithValue(ctx, ContextLocalJwtClaims, claims)
+		ctx := context.WithValue(r.Context(), ContextLocalJwtClaims, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

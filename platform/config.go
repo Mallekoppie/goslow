@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"reflect"
 	"sync"
 
 	"github.com/spf13/viper"
@@ -19,94 +18,72 @@ var (
 
 func writePlatformConfiguration(conf Config) error {
 	viper.Set("platform", conf)
-
-	err := viper.WriteConfig()
-	if err != nil {
-		log.Println("Error writing config: ", err.Error())
-		return err
-	}
-
-	return nil
+	return viper.WriteConfig()
 }
 
 func SetPlatformConfiguration(conf Config) {
-
 	mutex.Lock()
-	defer mutex.Unlock()
-
 	internalConfig = &conf
+	mutex.Unlock()
+	ConfigureLogger()
 }
 
 func GetPlatformConfiguration() (*Config, error) {
+	mutex.Lock()
+	defer mutex.Unlock()
 
-	if internalConfig == nil {
-		mutex.Lock()
-		if internalConfig == nil {
-			initializeDefaults := false
-			viper.SetConfigType("yml")
-			viper.AddConfigPath(".")
-			viper.SetConfigName("config")
-
-			err := viper.ReadInConfig()
-			if err != nil && reflect.TypeOf(err) == reflect.TypeOf(viper.ConfigFileNotFoundError{}) {
-				//	Initialize sensible defaults
-				fmt.Println("Config file `config.yml` not found. Using default configurations")
-				initializeDefaults = true
-			} else if err != nil {
-				log.Println("Unable to read config file: ", err.Error())
-				return internalConfig, err
-			}
-
-			if initializeDefaults {
-				createDefaultConfiguration()
-			} else {
-				err = viper.UnmarshalKey("platform", &internalConfig)
-				if err != nil {
-					log.Println("Error reading config: ", err.Error())
-					return internalConfig, err
-				}
-
-				err = internalConfig.checkPlatformConfiguration()
-				if err != nil {
-					log.Println("Config file incorrect: ", err.Error())
-					return internalConfig, err
-				}
-			}
-		}
-
-		err := internalConfig.checkPlatformConfiguration()
-		if err != nil {
-			log.Println("Config file incorrect: ", err.Error())
-			return internalConfig, err
-		}
-
-		mutex.Unlock()
+	if internalConfig != nil {
+		return internalConfig, nil
 	}
 
+	cfg := &Config{}
+	viper.SetConfigType("yml")
+	viper.AddConfigPath(".")
+	viper.AddConfigPath("./platform")
+	viper.SetConfigName("config")
+
+	if err := viper.ReadInConfig(); err != nil {
+		var notFound viper.ConfigFileNotFoundError
+		if errors.As(err, &notFound) {
+			fmt.Println("Config file `config.yml` not found. Using default configurations")
+			cfg = createDefaultConfiguration()
+		} else {
+			log.Println("Unable to read config file: ", err.Error())
+			return nil, err
+		}
+	} else if err := viper.UnmarshalKey("platform", cfg); err != nil {
+		log.Println("Error reading config: ", err.Error())
+		return nil, err
+	}
+
+	if err := cfg.checkPlatformConfiguration(); err != nil {
+		log.Println("Config file incorrect: ", err.Error())
+		return nil, err
+	}
+
+	internalConfig = cfg
 	return internalConfig, nil
 }
 
 func GetComponentConfiguration(key string, object interface{}) error {
 	err := viper.UnmarshalKey(key, &object)
 	if err != nil {
-		Log.Error("Unable to read component configuration", zap.String("configkey", key), zap.Error(err))
+		if Log != nil {
+			Log.Error("Unable to read component configuration", zap.String("configkey", key), zap.Error(err))
+		}
 		return err
 	}
-
 	return nil
 }
 
-// Config ... Platform configuration
 type Config struct {
 	Log struct {
 		Level              string
 		FileLoggingEnabled bool
 		FilePath           string
-		//MegaBytes
-		MaxSize    int
-		MaxBackups int
-		// Days
-		MaxAge int
+		MaxSize            int
+		MaxBackups         int
+		MaxAge             int
 	}
 
 	HTTP struct {
@@ -117,18 +94,15 @@ type Config struct {
 			TLSEnabled                   bool
 			AllowCorsForLocalDevelopment bool
 		}
-
 		Clients []httpClientConfig
 	}
 
 	Grpc struct {
 		Server struct {
-			ListeningAddress string
-			TLSCertFileName  string
-			TLSKeyFileName   string
-			TLSEnabled       bool
-
-			// For things like login paths that wonth have security
+			ListeningAddress     string
+			TLSCertFileName      string
+			TLSKeyFileName       string
+			TLSEnabled           bool
 			UnAuthenticatedPaths []string
 		}
 	}
@@ -141,21 +115,17 @@ type Config struct {
 				ClientID          string
 				AllowedAlgorithms []string
 			}
-			// If you have a proper IDP use OAuth and if you just want local tokens use LocalJwt
 			LocalJwt struct {
-				Enabled       bool
-				JwtSigningKey string
-				// JWT signing method, e.g., "HS256", "HS384", "HS512"
+				Enabled          bool
+				JwtSigningKey    string
 				JwtSigningMethod string
-				JwtExpiration    int64 // In Minutes
+				JwtExpiration    int64
 			}
-
 			Basic struct {
 				Enabled      bool
 				AllowedUsers map[string]string
 			}
 		}
-
 		Client struct {
 			OAuth []clientTokenConfig
 		}
@@ -193,7 +163,6 @@ type Config struct {
 	}
 }
 
-// HTTPClientConfig ... For HTTP client configuration
 type httpClientConfig struct {
 	ID                 string
 	TLSVerify          bool
@@ -201,25 +170,22 @@ type httpClientConfig struct {
 	RequestTimeout     int
 }
 
-// OwnTokenConfig ... Will need to secure the credentials in the future
 type clientTokenConfig struct {
-	ID                        string
-	IdpWellKnownURL           string
-	RenewCheckIntervalSeconds float64
-	RenewCheckTimeMinutes     float64
-	IdpTokenEndpoint          string
-	ClientID                  string
-	ClientSecret              string
-	Username                  string
-	Password                  string
-	VaultPath                 string
-	VaultClientIdKey          string
-	VaultClientSecretKey      string
-	VaultUsernameKey          string
-	VaultPasswordKey          string
-	VaultIdpTokenEndpointKey  string
-
-	// Internal for the retrieved Vault values
+	ID                         string
+	IdpWellKnownURL            string
+	RenewCheckIntervalSeconds  float64
+	RenewCheckTimeMinutes      float64
+	IdpTokenEndpoint           string
+	ClientID                   string
+	ClientSecret               string
+	Username                   string
+	Password                   string
+	VaultPath                  string
+	VaultClientIdKey           string
+	VaultClientSecretKey       string
+	VaultUsernameKey           string
+	VaultPasswordKey           string
+	VaultIdpTokenEndpointKey   string
 	vaultClientIdValue         string
 	vaultClientSecretValue     string
 	vaultUsernameValue         string
@@ -229,31 +195,40 @@ type clientTokenConfig struct {
 }
 
 func (conf *Config) checkPlatformConfiguration() error {
-	if len(conf.Log.FilePath) < 1 {
+	if conf == nil {
+		return errors.New("config is nil")
+	}
+	if conf.Log.Level == "" {
+		conf.Log.Level = "info"
+	}
+	if conf.Log.FilePath == "" {
 		log.Println("Configuration Log.FiePath is empty. Defaulting to ./default.log")
 		conf.Log.FilePath = "./default.log"
 	}
-
 	if conf.Log.MaxAge == 0 {
 		log.Println("Configuration Log.MaxAge is empty. Defaulting to 10")
 		conf.Log.MaxAge = 10
 	}
-
 	if conf.Log.MaxSize == 0 {
 		log.Println("Configuration Log.MaxSize is empty. Defaulting to 51200")
 		conf.Log.MaxSize = 51200
 	}
-
+	if conf.Log.MaxBackups == 0 {
+		conf.Log.MaxBackups = 10
+	}
 	return nil
 }
 
-func createDefaultConfiguration() {
-	internalConfig = &Config{}
-	internalConfig.Auth.Server.Basic.Enabled = false
-	internalConfig.Auth.Server.OAuth.Enabled = false
-	internalConfig.HTTP.Server.TLSEnabled = false
-	internalConfig.HTTP.Server.ListeningAddress = "127.0.0.1:10000"
-	internalConfig.Log.FileLoggingEnabled = false
-	internalConfig.Database.BoltDB.Enabled = false
-	internalConfig.Component.ComponentName = "Not Specified"
+func createDefaultConfiguration() *Config {
+	cfg := &Config{}
+	cfg.Auth.Server.Basic.Enabled = false
+	cfg.Auth.Server.OAuth.Enabled = false
+	cfg.HTTP.Server.TLSEnabled = false
+	cfg.HTTP.Server.ListeningAddress = "127.0.0.1:10000"
+	cfg.Log.Level = "info"
+	cfg.Log.FileLoggingEnabled = false
+	cfg.Database.BoltDB.Enabled = false
+	cfg.Component.ComponentName = "Not Specified"
+	cfg.checkPlatformConfiguration()
+	return cfg
 }

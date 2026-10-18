@@ -3,236 +3,321 @@ package platform
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
+	"sync"
+	"time"
 
-	"github.com/boltdb/bolt"
+	bbolt "go.etcd.io/bbolt"
 	"go.uber.org/zap"
 )
 
 var (
-	dbBolt              *bolt.DB
+	dbBolt              *bbolt.DB
+	dbBoltMu            sync.Mutex
 	ErrBoltDBNoDBObject = errors.New("no db object")
+	boltFileMode        = os.FileMode(0o600)
+	defaultOpenTimeout  = 5 * time.Second
 )
 
-type boltDbDatabase struct {
-}
+type boltDbDatabase struct{}
 
-func databaseHackToRestartServiceIKnowThisIsBad(conf *Config) {
-	os.Chmod(conf.Database.BoltDB.FileName, 0755)
-	os.Remove(conf.Database.BoltDB.FileName + ".lock")
-
-}
-
-// SetupBoltDB initializes BoltDB based on the platform configuration.
-// This function must be called explicitly before using any BoltDB functions.
-// Returns an error if BoltDB is not enabled in the configuration or if initialization fails.
-func SetupBoltDB() error {
-	if internalConfig.Database.BoltDB.Enabled == false {
-		Log.Info("Database BoltDb not enabled")
-		return errors.New("BoltDB is not enabled in configuration")
+func describeBoltOpenError(path string, err error) error {
+	if err == nil {
+		return nil
 	}
+	if errors.Is(err, bbolt.ErrTimeout) {
+		return fmt.Errorf("bolt DB %q is locked by another process: %w", path, err)
+	}
+	return fmt.Errorf("failed to open bolt DB %q (mode=%#o): %w", path, boltFileMode, err)
+}
 
-	Log.Debug("Setting up BoltDB",
-		zap.String("filename", internalConfig.Database.BoltDB.FileName))
-
-	// Hack to make the DB file writeable
-	databaseHackToRestartServiceIKnowThisIsBad(internalConfig)
-
-	var err error
-	dbBolt, err = bolt.Open(internalConfig.Database.BoltDB.FileName, os.ModeExclusive, nil)
+func OpenBoltDB(path string, timeout time.Duration) (*bbolt.DB, error) {
+	if path == "" {
+		return nil, errors.New("bolt db path is empty")
+	}
+	if timeout <= 0 {
+		timeout = defaultOpenTimeout
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return nil, err
+		}
+	}
+	db, err := bbolt.Open(path, boltFileMode, &bbolt.Options{Timeout: timeout})
 	if err != nil {
-		Log.Error("Error opening database", zap.Error(err))
+		return nil, describeBoltOpenError(path, err)
+	}
+	return db, nil
+}
+
+func ensureBoltDB() error {
+	if dbBolt != nil {
+		return nil
+	}
+	conf, err := GetPlatformConfiguration()
+	if err != nil {
 		return err
 	}
+	if conf == nil || !conf.Database.BoltDB.Enabled {
+		if Log != nil {
+			Log.Info("Database BoltDb not enabled")
+		}
+		return ErrBoltDbIsNotEnabled
+	}
+	return SetupBoltDB()
+}
 
-	Log.Debug("BoltDB setup completed successfully")
+func SetupBoltDB() error {
+	conf, err := GetPlatformConfiguration()
+	if err != nil {
+		return err
+	}
+	if conf == nil || !conf.Database.BoltDB.Enabled {
+		if Log != nil {
+			Log.Info("Database BoltDb not enabled")
+		}
+		return ErrBoltDbIsNotEnabled
+	}
+	fileName := conf.Database.BoltDB.FileName
+	if fileName == "" {
+		fileName = "./bolt.db"
+	}
+	if Log != nil {
+		Log.Debug("Setting up BoltDB", zap.String("filename", fileName))
+	}
+
+	dbBoltMu.Lock()
+	defer dbBoltMu.Unlock()
+	if dbBolt != nil {
+		return nil
+	}
+	opened, err := OpenBoltDB(fileName, defaultOpenTimeout)
+	if err != nil {
+		if Log != nil {
+			Log.Error("Error opening database", zap.Error(err))
+		}
+		return err
+	}
+	dbBolt = opened
+	if Log != nil {
+		Log.Debug("BoltDB setup completed successfully")
+	}
 	return nil
 }
 
 func (d *boltDbDatabase) Close() error {
-	return dbBolt.Close()
+	dbBoltMu.Lock()
+	defer dbBoltMu.Unlock()
+	if dbBolt == nil {
+		return nil
+	}
+	err := dbBolt.Close()
+	dbBolt = nil
+	return err
 }
 
 func (d *boltDbDatabase) SaveObject(bucket string, id string, object interface{}) error {
-
-	Log.Debug("Saving object to DB",
-		zap.String("bucket", bucket),
-		zap.String("id", id),
-		zap.Any("object", object))
-
-	if dbBolt == nil {
-		Log.Error("BoltDB instance is nil")
-		return ErrBoltDBNoDBObject
+	if Log != nil {
+		Log.Debug("Saving object to DB", zap.String("bucket", bucket), zap.String("id", id), zap.Any("object", object))
 	}
-
-	err := dbBolt.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
-		if err != nil {
-			Log.Error("Error creating bucket", zap.Error(err))
-			return err
-		}
-
-		data, err := json.Marshal(object)
-		if err != nil {
-			Log.Error("Error marshalling object", zap.Error(err))
-			return err
-		}
-
-		err = b.Put([]byte(id), data)
-		if err != nil {
-			Log.Error("Error adding data", zap.Error(err))
-			return err
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		Log.Error("Error updating DB", zap.Error(err))
+	if err := ensureBoltDB(); err != nil {
 		return err
 	}
 
-	return nil
+	dbBoltMu.Lock()
+	defer dbBoltMu.Unlock()
+	if dbBolt == nil {
+		if Log != nil {
+			Log.Error("BoltDB instance is nil")
+		}
+		return ErrBoltDBNoDBObject
+	}
+	return dbBolt.Update(func(tx *bbolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
+		if err != nil {
+			if Log != nil {
+				Log.Error("Error creating bucket", zap.Error(err))
+			}
+			return err
+		}
+		data, err := json.Marshal(object)
+		if err != nil {
+			if Log != nil {
+				Log.Error("Error marshalling object", zap.Error(err))
+			}
+			return err
+		}
+		if err := b.Put([]byte(id), data); err != nil {
+			if Log != nil {
+				Log.Error("Error adding data", zap.Error(err))
+			}
+			return err
+		}
+		return nil
+	})
 }
 
 func (d *boltDbDatabase) ReadObject(bucket string, id string, object interface{}) error {
-
-	err := dbBolt.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket))
-		result := b.Get([]byte(id))
-		if len(result) > 0 {
-			err := json.Unmarshal(result, &object)
-			if err != nil {
-				Log.Error("Error marshalling DB response", zap.Error(err))
-				return err
-			}
-
-		} else {
-			Log.Warn("No entry found in the database", zap.String("id", id))
-			return ErrNoEntryFoundInDB
-		}
-
-		return nil
-	})
-	if err != nil {
-		Log.Error("Error readign from database", zap.Error(err))
+	if object == nil {
+		return errors.New("nil object target")
+	}
+	if err := ensureBoltDB(); err != nil {
 		return err
 	}
-
-	return nil
+	dbBoltMu.Lock()
+	defer dbBoltMu.Unlock()
+	if dbBolt == nil {
+		if Log != nil {
+			Log.Error("BoltDB instance is nil")
+		}
+		return ErrBoltDBNoDBObject
+	}
+	return dbBolt.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		if b == nil {
+			if Log != nil {
+				Log.Warn("No entry found in the database", zap.String("id", id))
+			}
+			return ErrNoEntryFoundInDB
+		}
+		result := b.Get([]byte(id))
+		if result == nil {
+			if Log != nil {
+				Log.Warn("No entry found in the database", zap.String("id", id))
+			}
+			return ErrNoEntryFoundInDB
+		}
+		if err := json.Unmarshal(result, object); err != nil {
+			if Log != nil {
+				Log.Error("Error marshalling DB response", zap.Error(err))
+			}
+			return err
+		}
+		return nil
+	})
 }
 
-// Returns all entries in the bucket. Values are still json strings
 func (d *boltDbDatabase) ReadAllObjects(bucket string) (map[string]string, error) {
-
 	results := make(map[string]string)
-
-	err := dbBolt.View(func(tx *bolt.Tx) error {
+	if err := ensureBoltDB(); err != nil {
+		return results, err
+	}
+	dbBoltMu.Lock()
+	defer dbBoltMu.Unlock()
+	if dbBolt == nil {
+		return results, ErrBoltDBNoDBObject
+	}
+	if err := dbBolt.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
 		if b == nil {
 			return ErrNoEntryFoundInDB
 		}
-
 		cursor := b.Cursor()
-
 		for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
 			results[string(key)] = string(value)
 		}
 		return nil
-	})
-	if err != nil {
-		Log.Error("Error reading from database", zap.Error(err))
+	}); err != nil {
+		if Log != nil {
+			Log.Error("Error reading from database", zap.Error(err))
+		}
 		return results, err
 	}
-
 	return results, nil
 }
 
 func (d *boltDbDatabase) RemoveObject(bucket string, id string) error {
-
-	Log.Debug("Removing object from bucket",
-		zap.String("bucket", bucket),
-		zap.String("id", id))
-
-	if dbBolt == nil {
-		Log.Error("BoltDB instance is nil")
-		return ErrBoltDBNoDBObject
+	if Log != nil {
+		Log.Debug("Removing object from bucket", zap.String("bucket", bucket), zap.String("id", id))
 	}
-
-	err := dbBolt.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
-		if err != nil {
-			Log.Error("Error creating bucket", zap.Error(err))
-			return err
-		}
-
-		err = b.Delete([]byte(id))
-		if err != nil {
-			Log.Error("Error removing key from bucket", zap.String("id", id), zap.String("bucket", bucket))
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		Log.Error("Error updating DB", zap.Error(err))
+	if err := ensureBoltDB(); err != nil {
 		return err
 	}
-
-	return nil
+	dbBoltMu.Lock()
+	defer dbBoltMu.Unlock()
+	if dbBolt == nil {
+		if Log != nil {
+			Log.Error("BoltDB instance is nil")
+		}
+		return ErrBoltDBNoDBObject
+	}
+	return dbBolt.Update(func(tx *bbolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
+		if err != nil {
+			if Log != nil {
+				Log.Error("Error creating bucket", zap.Error(err))
+			}
+			return err
+		}
+		if err = b.Delete([]byte(id)); err != nil {
+			if Log != nil {
+				Log.Error("Error removing key from bucket", zap.String("id", id), zap.String("bucket", bucket))
+			}
+		}
+		return nil
+	})
 }
 
 func (d *boltDbDatabase) RemoveBucket(bucket string) error {
-
-	Log.Debug("Deleting bucket",
-		zap.String("bucket", bucket))
-
-	if dbBolt == nil {
-		Log.Error("BoltDB instance is nil")
-		return ErrBoltDBNoDBObject
+	if Log != nil {
+		Log.Debug("Deleting bucket", zap.String("bucket", bucket))
 	}
-
-	err := dbBolt.Update(func(tx *bolt.Tx) error {
-		err := tx.DeleteBucket([]byte(bucket))
-		if err != nil && err == bolt.ErrBucketNotFound {
-			return nil
-		}
-
-		if err != nil {
-			Log.Error("Error removing bucket", zap.Error(err))
-			return err
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		Log.Error("Error updating DB", zap.Error(err))
+	if err := ensureBoltDB(); err != nil {
 		return err
 	}
-
-	return nil
+	dbBoltMu.Lock()
+	defer dbBoltMu.Unlock()
+	if dbBolt == nil {
+		if Log != nil {
+			Log.Error("BoltDB instance is nil")
+		}
+		return ErrBoltDBNoDBObject
+	}
+	return dbBolt.Update(func(tx *bbolt.Tx) error {
+		err := tx.DeleteBucket([]byte(bucket))
+		if err != nil && err == bbolt.ErrBucketNotFound {
+			return nil
+		}
+		if err != nil {
+			if Log != nil {
+				Log.Error("Error removing bucket", zap.Error(err))
+			}
+			return err
+		}
+		return nil
+	})
 }
 
 func (d *boltDbDatabase) RemoveDBFile() error {
-
-	Log.Debug("Removing BoltDB file")
-
-	if dbBolt == nil {
-		Log.Error("BoltDB instance is nil")
+	if Log != nil {
+		Log.Debug("Removing BoltDB file")
 	}
-
-	err := dbBolt.Close()
-	if err != nil {
-		Log.Error("Error closing BoltDB", zap.Error(err))
+	conf, err := GetPlatformConfiguration()
+	if err != nil || conf == nil {
 		return err
 	}
-
-	err = os.Remove(internalConfig.Database.BoltDB.FileName)
-	if err != nil {
-		Log.Error("Error removing BoltDB file", zap.Error(err))
+	fileName := conf.Database.BoltDB.FileName
+	if fileName == "" {
+		fileName = "./bolt.db"
+	}
+	dbBoltMu.Lock()
+	defer dbBoltMu.Unlock()
+	if dbBolt != nil {
+		if err := dbBolt.Close(); err != nil {
+			if Log != nil {
+				Log.Error("Error closing BoltDB", zap.Error(err))
+			}
+			return err
+		}
+		dbBolt = nil
+	}
+	if err := os.Remove(fileName); err != nil && !os.IsNotExist(err) {
+		if Log != nil {
+			Log.Error("Error removing BoltDB file", zap.Error(err))
+		}
 		return err
 	}
-
 	return nil
 }

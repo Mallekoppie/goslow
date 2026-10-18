@@ -11,15 +11,7 @@ var (
 )
 
 func init() {
-	Database := PlatformDatabases{}
-	Database.BoltDb = boltDbDatabase{}
-	// err := Database.BoltDb.createBoltDatabase()
-	// Database.BoltDb.createBoltDatabase()
-	// if err == ErrBoltDbIsNotEnabled {
-	// 	// we do nothing
-	// } else {
-	// 	Logger.Fatal("Error creating BoltDB database", zap.)
-	// }
+	Database = PlatformDatabases{BoltDb: boltDbDatabase{}}
 }
 
 type PlatformDatabases struct {

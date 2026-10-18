@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -24,6 +25,7 @@ var (
 	oAuthHttpClient                *http.Client
 	oAuthDefaultTLSConfig          = &tls.Config{InsecureSkipVerify: true}
 	oAuthTokens                    map[string]string
+	oAuthStateLock                 sync.RWMutex
 
 	OAuth oAuthOrganiser
 
@@ -45,18 +47,19 @@ type idpDetailsCacheItem struct {
 
 func init() {
 	initializeVault()
-	initializeOAuthTokenClients()
-
 	oAuthHttpClient = createOAuthHTTPClient()
+	initializeOAuthTokenClients()
 
 	issuerJwkUrlMap = make(map[string]idpDetailsCacheItem, 0)
 }
 
 func initializeOAuthTokenClients() {
 	if len(internalConfig.Auth.Client.OAuth) > 0 {
-		oAuthTokens = make(map[string]string, 0)
-		oAuthClientTokenConfiguration = make([]clientTokenConfig, 0)
+		oAuthStateLock.Lock()
+		oAuthTokens = make(map[string]string, len(internalConfig.Auth.Client.OAuth))
+		oAuthClientTokenConfiguration = make([]clientTokenConfig, 0, len(internalConfig.Auth.Client.OAuth))
 		oAuthClientTokenEnabled = true
+		oAuthStateLock.Unlock()
 
 		for _, v := range internalConfig.Auth.Client.OAuth {
 			if internalConfig.Vault.Enabled && len(v.VaultPath) > 0 {
@@ -75,7 +78,9 @@ func initializeOAuthTokenClients() {
 				v.vaultEnabled = true
 			}
 
+			oAuthStateLock.Lock()
 			oAuthClientTokenConfiguration = append(oAuthClientTokenConfiguration, v)
+			oAuthStateLock.Unlock()
 
 			go autoRenewOAuth2Token(v)
 		}
@@ -97,7 +102,9 @@ func autoRenewOAuth2Token(config clientTokenConfig) {
 			}
 			currentToken = auth2Token
 			currentExpiryTime = getExpiryTimeFromToken(currentToken)
+			oAuthStateLock.Lock()
 			oAuthTokens[config.ID] = currentToken
+			oAuthStateLock.Unlock()
 
 			Log.Info("Token renewed", zap.String("config_id", config.ID), zap.Time("next_expiry", currentExpiryTime))
 		}
@@ -133,7 +140,9 @@ func createOAuthHTTPClient() *http.Client {
 }
 
 func (o oAuthOrganiser) GetToken(id string) (accessToken string, err error) {
+	oAuthStateLock.RLock()
 	token := oAuthTokens[id]
+	oAuthStateLock.RUnlock()
 
 	if len(token) < 1 {
 		Log.Error("No token in local cache", zap.String("config_id", id))
@@ -151,12 +160,14 @@ func (o oAuthOrganiser) GetToken(id string) (accessToken string, err error) {
 
 func internalGetOAuth2Token(id string) (accessToken string, err error) {
 	var clientConfig clientTokenConfig
+	oAuthStateLock.RLock()
 	for _, v := range oAuthClientTokenConfiguration {
 		if v.ID == id {
 			clientConfig = v
 			break
 		}
 	}
+	oAuthStateLock.RUnlock()
 
 	if len(clientConfig.ID) < 1 {
 		Log.Error("Found no OAuth2 client config", zap.String("config_id", id))
