@@ -2,10 +2,11 @@ package service
 
 import (
 	"bytes"
-	"github.com/Mallekoppie/goslow/platform"
-	"go.uber.org/zap"
 	"http-web-server/model"
 	"net/http"
+
+	"github.com/Mallekoppie/goslow/platform"
+	"go.uber.org/zap"
 )
 
 func HelloWorld(w http.ResponseWriter, r *http.Request) {
