@@ -1,10 +1,9 @@
 package platform
 
 import (
-	"encoding/json"
 	"errors"
-	"io/ioutil"
-	"net/http"
+	"fmt"
+	"os"
 	"time"
 
 	vaultapi "github.com/hashicorp/vault/api"
@@ -16,39 +15,37 @@ var (
 	vaultClientList                 []*vaultapi.Client
 	vaultEnabled                    bool
 	vaultInitialized                = false
-	ErrVaultNotEnabled              = errors.New("Vault not enabled")
-	ErrVaultUnableToReadSecrets     = errors.New("Unable to read secrets from Vault")
-	ErrVaultNoAuthMethodsConfigured = errors.New("No auth methods configured for Vault")
+	ErrVaultNotEnabled              = errors.New("vault not enabled")
+	ErrVaultUnableToReadSecrets     = errors.New("unable to read secrets from vault")
+	ErrVaultNoAuthMethodsConfigured = errors.New("no auth methods configured for vault")
 )
 
 type platformVault struct {
 }
 
-func init() {
-	initializeVault()
-}
+// initializeVault applies the supplied configuration to the Vault subsystem.
+// It is idempotent: existing state is reset before applying the new config.
+func initializeVault(config *Config) error {
+	vaultClientList = nil
+	vaultEnabled = false
+	vaultInitialized = false
+	Vault = platformVault{}
 
-func initializeVault() {
-	if vaultInitialized == false {
-		Vault = platformVault{}
-		config, err := GetPlatformConfiguration()
-		if err != nil {
-			Log.Error("Error loading configuration in Vault initialization", zap.Error(err))
-		}
-
-		if config.Vault.Enabled {
-			vaultEnabled = true
-			err = setupVaultClients(config)
-			if err != nil {
-				Log.Error("Unable to create vault client during initialization", zap.Error(err))
-			}
-		} else {
-			vaultEnabled = false
-		}
-
+	if config == nil {
+		return errors.New("vault initialization requires configuration")
+	}
+	if !config.Vault.Enabled {
 		vaultInitialized = true
+		return nil
 	}
 
+	if err := setupVaultClients(config); err != nil {
+		return fmt.Errorf("unable to initialize vault clients: %w", err)
+	}
+
+	vaultEnabled = true
+	vaultInitialized = true
+	return nil
 }
 
 func createVaultClient(address string, config *Config) (client *vaultapi.Client, err error) {
@@ -85,7 +82,7 @@ func createVaultClient(address string, config *Config) (client *vaultapi.Client,
 
 	if config.Vault.Token.Enabled {
 		if len(config.Vault.Token.TokenPath) > 0 {
-			tokenValue, err := ioutil.ReadFile(config.Vault.Token.TokenPath)
+			tokenValue, err := os.ReadFile(config.Vault.Token.TokenPath)
 			if err != nil {
 				Log.Error("Unable to read contents of token file", zap.Error(err))
 			}
@@ -135,8 +132,13 @@ func (v *platformVault) GetSecrets(path string) (secrets map[string]string, err 
 		return secrets, ErrVaultNotEnabled
 	}
 
+	conf, confErr := GetPlatformConfiguration()
+	if confErr != nil || conf == nil {
+		return secrets, confErr
+	}
+
 	for _, c := range vaultClientList {
-		if internalConfig.Vault.Token.Enabled {
+		if conf.Vault.Token.Enabled {
 			secretResult, err := c.Logical().Read(path)
 			if err != nil {
 				Log.Error("Error retrieving secret with token", zap.Error(err), zap.String("address", c.Address()))
@@ -150,34 +152,18 @@ func (v *platformVault) GetSecrets(path string) (secrets map[string]string, err 
 			}
 
 			break
-		} else if internalConfig.Vault.Cert.Enabled {
-			request := c.NewRequest("POST", "/v1/auth/cert/login")
-			response, err := c.RawRequest(request)
+		} else if conf.Vault.Cert.Enabled {
+			loginSecret, err := c.Logical().Write("auth/cert/login", map[string]interface{}{})
 			if err != nil {
-				Log.Error("Error loging in to Vault with cert to get token", zap.Error(err))
+				Log.Error("Error logging in to Vault with cert to get token", zap.Error(err))
+				continue
+			}
+			if loginSecret == nil || loginSecret.Auth == nil || loginSecret.Auth.ClientToken == "" {
+				Log.Error("Vault cert login returned no client token")
 				continue
 			}
 
-			if response.StatusCode != http.StatusOK {
-				Log.Error("Incorrect responsecode from Vault when logging in with Cert", zap.Int("response_code", response.StatusCode))
-				continue
-			}
-			defer response.Body.Close()
-			responseData, err := ioutil.ReadAll(response.Body)
-			if err != nil {
-				Log.Error("Error reading login response using cert to Vault", zap.Error(err))
-				continue
-			}
-
-			responseModel := vaultLoginResponse{}
-
-			err = json.Unmarshal(responseData, &responseModel)
-			if err != nil {
-				Log.Error("Unable too unmarshal response from vault login", zap.Error(err))
-				continue
-			}
-
-			c.SetToken(responseModel.Auth.ClientToken)
+			c.SetToken(loginSecret.Auth.ClientToken)
 
 			secretResult, err := c.Logical().Read(path)
 			if err != nil {
@@ -204,32 +190,4 @@ func (v *platformVault) GetSecrets(path string) (secrets map[string]string, err 
 	}
 
 	return secrets, nil
-}
-
-type vaultLoginResponse struct {
-	RequestID     string      `json:"request_id"`
-	LeaseID       string      `json:"lease_id"`
-	Renewable     bool        `json:"renewable"`
-	LeaseDuration int         `json:"lease_duration"`
-	Data          interface{} `json:"data"`
-	WrapInfo      interface{} `json:"wrap_info"`
-	Warnings      interface{} `json:"warnings"`
-	Auth          struct {
-		ClientToken   string   `json:"client_token"`
-		Accessor      string   `json:"accessor"`
-		Policies      []string `json:"policies"`
-		TokenPolicies []string `json:"token_policies"`
-		Metadata      struct {
-			AuthorityKeyID string `json:"authority_key_id"`
-			CertName       string `json:"cert_name"`
-			CommonName     string `json:"common_name"`
-			SerialNumber   string `json:"serial_number"`
-			SubjectKeyID   string `json:"subject_key_id"`
-		} `json:"metadata"`
-		LeaseDuration int    `json:"lease_duration"`
-		Renewable     bool   `json:"renewable"`
-		EntityID      string `json:"entity_id"`
-		TokenType     string `json:"token_type"`
-		Orphan        bool   `json:"orphan"`
-	} `json:"auth"`
 }

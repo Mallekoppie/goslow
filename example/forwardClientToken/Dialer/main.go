@@ -15,7 +15,7 @@ func main() {
 		return
 	}
 
-	for true {
+	for {
 		time.Sleep(time.Second * 20)
 
 		token, err := platform.OAuth.GetToken("default")

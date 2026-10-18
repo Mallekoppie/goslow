@@ -1,11 +1,23 @@
-gen:	
-	rm -rf ./server/gen
-	rm -rf ./client/gen
+gen:
+	rm -rf ./server/gen ./client/gen ./tmpgen ./tmpgen-client ./hello/hello
 
-	protoc --go_opt=paths=source_relative  --go-grpc_opt=paths=source_relative --go-grpc_out=./hello --go_out=./hello ./hello/hello.proto
-	cp -r ./hello/hello ./server/gen
-	cp -r ./hello/hello ./client/gen
-	rm -rf ./hello/hello
+	protoc --go_opt=paths=source_relative --go_out=./hello ./hello/hello.proto
+
+	mkdir -p ./tmpgen ./tmpgen-client
+	protoc --connect-go_opt=paths=source_relative \
+		--connect-go_opt=Mhello/hello.proto=grpc-server/gen \
+		--connect-go_out=./tmpgen ./hello/hello.proto
+	protoc --connect-go_opt=paths=source_relative \
+		--connect-go_opt=Mhello/hello.proto=grpc-client/gen \
+		--connect-go_out=./tmpgen-client ./hello/hello.proto
+
+	mkdir -p ./server/gen ./client/gen
+	cp ./hello/hello/hello.pb.go ./server/gen/
+	cp -r ./tmpgen/hello/genconnect ./server/gen/
+	cp ./hello/hello/hello.pb.go ./client/gen/
+	cp -r ./tmpgen-client/hello/genconnect ./client/gen/
+
+	rm -rf ./hello/hello ./tmpgen ./tmpgen-client
 
 build-server:
 	cd ./server && go build -o server

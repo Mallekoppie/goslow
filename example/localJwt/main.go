@@ -17,20 +17,21 @@ var Routes = platform.Routes{
 		Method:      http.MethodPost,
 		HandlerFunc: HandleLogin,
 		SlaMs:       0,
+		Auth:        platform.AuthNone,
 	},
 	platform.Route{
-		Path:         "/renew",
-		Method:       http.MethodGet,
-		HandlerFunc:  HandleRenew,
-		SlaMs:        0,
-		AuthRequired: true,
+		Path:        "/renew",
+		Method:      http.MethodGet,
+		HandlerFunc: HandleRenew,
+		SlaMs:       0,
+		Auth:        platform.AuthLocalJWT,
 	},
 	platform.Route{
-		Path:         "/query",
-		Method:       http.MethodGet,
-		HandlerFunc:  HandleQuery,
-		SlaMs:        0,
-		AuthRequired: true,
+		Path:        "/query",
+		Method:      http.MethodGet,
+		HandlerFunc: HandleQuery,
+		SlaMs:       0,
+		Auth:        platform.AuthLocalJWT,
 	},
 }
 
@@ -62,7 +63,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/text")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(token))
-	platform.Logger.Info("User logged in successfully", zap.String("username", login.Username))
+	platform.Log.Info("User logged in successfully", zap.String("username", login.Username))
 
 }
 
@@ -70,27 +71,21 @@ func HandleQuery(w http.ResponseWriter, r *http.Request) {
 	// Handle query logic here
 	// For example, return user information based on JWT token
 
-	ctx := r.Context()
-	result := ctx.Value(platform.ContextLocalJwtClaims)
+	result := platform.ClaimsFromContext(r.Context())
 	if result == nil {
-		platform.Logger.Error("No JWT claims found in context")
+		platform.Log.Error("No JWT claims found in context")
 		w.Write([]byte("Query successful"))
 		return
 	}
 
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		platform.Logger.Error("Invalid JWT claims type in context")
-		http.Error(w, "Invalid JWT claims", http.StatusInternalServerError)
-		return
-	}
+	resultMap := result
 	username, ok := resultMap["username"].(string)
 	if !ok {
-		platform.Logger.Error("Username not found in JWT claims")
+		platform.Log.Error("Username not found in JWT claims")
 		http.Error(w, "Invalid JWT claims", http.StatusInternalServerError)
 		return
 	}
-	platform.Logger.Info("Query successful", zap.String("username", username))
+	platform.Log.Info("Query successful", zap.String("username", username))
 	w.Write([]byte("Query successful for user: " + username))
 
 }
@@ -99,19 +94,13 @@ func HandleRenew(w http.ResponseWriter, r *http.Request) {
 	// Handle token renewal logic here
 	// For example, generate a new JWT token with updated claims
 
-	ctx := r.Context()
-	result := ctx.Value(platform.ContextLocalJwtClaims)
+	result := platform.ClaimsFromContext(r.Context())
 	if result == nil {
 		http.Error(w, "No JWT claims found in context", http.StatusUnauthorized)
 		return
 	}
 
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		http.Error(w, "Invalid JWT claims type in context", http.StatusInternalServerError)
-		return
-	}
-
+	resultMap := result
 	username, ok := resultMap["username"].(string)
 	if !ok {
 		http.Error(w, "Username not found in JWT claims", http.StatusInternalServerError)

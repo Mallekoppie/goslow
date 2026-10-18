@@ -14,7 +14,16 @@ platform:
       tlscertfilename: ""
       tlskeyfilename: ""
       tlsenabled: false
-      AllowCorsForLocalDevelopment: true
+      # CORS is exact-origin only; wildcards are rejected. List the Flutter
+      # development origin explicitly when needed.
+      allowedorigins: []
+      # Default JSON body limit in bytes (1 MiB when omitted).
+      maxrequestbodybytes: 1048576
+      # Server timeouts in seconds. Omit to use the defaults (5/30/60/120).
+      readheadertimeoutseconds: 5
+      readtimeoutseconds: 30
+      writetimeoutseconds: 60
+      idletimeoutseconds: 120
     clients:
     - id: default
       tlsverify: false
@@ -26,10 +35,17 @@ platform:
       requesttimeout: 10
   auth:
     server:
+      # Unified unauthenticated allow-list for HTTP routes and RPC procedures.
+      # Entries are exact paths or "METHOD /path". /metrics is never mounted
+      # on the application origin.
+      unauthenticatedpaths: []
       oauth:
         enabled: false
         idpwellknownurl: ""
         clientid: ""
+        # Claim that carries roles. Literal key first (e.g. a Zitadel URN),
+        # then a dotted path. Supports string lists and object keys.
+        rolesclaim: roles
         allowedalgorithms:
         - rs256
         - rs384
@@ -45,7 +61,7 @@ platform:
           renewCheckTimeMinutes: 5
           IdpTokenEndpoint: ""
           clientid: federate-token-client
-          clientsecret: a4fed4bd-81d9-4267-8506-3fe805b7dc27
+          clientsecret: "REPLACE_WITH_SECRET"
           username:
           password:
           vaultEnabled: true
@@ -63,10 +79,44 @@ platform:
           password: testpassword
   component:
     componentname: Unit Test
+  grpc:
+    server:
+      listeningaddress: 0.0.0.0:9001
+      tlscertfilename: ""
+      tlskeyfilename: ""
+      tlsenabled: false
+      # Explicit Connect auth strategy: none, local-jwt, oauth, local-or-oidc.
+      # Required when local jwt or oauth is enabled (fail closed).
+      auth: none
+      # Per-procedure role requirements, e.g. "/pkg.Service/Method": [admin].
+      procedureroles: {}
+      # Health and reflection are development features; both default to false.
+      healthenabled: false
+      reflectionenabled: false
+      # SLA warning threshold for RPC access logs, in milliseconds.
+      slams: 0
+      # CORS is exact-origin only; wildcards are rejected.
+      allowedorigins: []
+      # Server timeouts in seconds. Omit to use the defaults (5/30/60/120).
+      readheadertimeoutseconds: 5
+      readtimeoutseconds: 30
+      # Unary deadline. Streams use streamtimeoutseconds (0 = unlimited).
+      writetimeoutseconds: 60
+      streamtimeoutseconds: 0
+      idletimeoutseconds: 120
+      # Maximum request size in bytes. 0 uses the Connect default.
+      maxreceivemessagebytes: 0
+  metrics:
+    # Metrics are always served on their own listener, never on the app origin.
+    enabled: false
+    listenaddress: 127.0.0.1:9100
+    path: /metrics
   database:
     boltdb:
       enabled: true
       filename: ./bolt.db
+      # How long to wait for the file lock before failing. Defaults to 5.
+      opentimeoutseconds: 5
   vault:
     enabled: false
     addresslist:
@@ -81,7 +131,7 @@ platform:
 #      This must be empty if you want to use the token here in the config.
 #      The token path will be used first
       TokenPath: ''
-      token: "s.aRADbzy3XXaH6dEj3hvHC3BN"
+      token: "REPLACE_WITH_VAULT_TOKEN"
     Cert:
       enabled: false
       CertFile: './client.cer'

@@ -1,0 +1,59 @@
+{
+  "name": "goslow (Go)",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "GO_VERSION": "1.27"
+    }
+  },
+
+  // Needed on SELinux hosts (Bazzite/Fedora Atomic) where Podman cannot apply
+  // a label to the workspace bind mount. Harmless on Docker.
+  "runArgs": ["--security-opt", "label=disable"],
+
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+
+  // Keep module and build caches off the workspace bind mount. Faster
+  // `go test -race ./...` and no host filesystem churn.
+  "mounts": [
+    "source=goslow-gomod,target=/go/pkg/mod,type=volume",
+    "source=goslow-gobuild,target=/home/vscode/.cache/go-build,type=volume"
+  ],
+
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "redhat.vscode-yaml",
+        "editorconfig.editorconfig"
+      ],
+      "settings": {
+        "go.useLanguageServer": true,
+        "go.toolsManagement.autoUpdate": true,
+        "go.testFlags": ["-race", "-count=1"],
+        "go.testTimeout": "120s",
+        "[go]": {
+          "editor.formatOnSave": true,
+          "editor.defaultFormatter": "golang.go",
+          "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+          }
+        },
+        "[go.mod]": {
+          "editor.formatOnSave": true
+        },
+        "files.eol": "\n"
+      }
+    }
+  },
+
+  "forwardPorts": [9001, 9111, 10000],
+  "portsAttributes": {
+    "9001": { "label": "gRPC examples" },
+    "9111": { "label": "HTTP (platform/config.yml)" },
+    "10000": { "label": "HTTP default" }
+  }
+}

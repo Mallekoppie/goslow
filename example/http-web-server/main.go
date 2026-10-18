@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+
 	"github.com/Mallekoppie/goslow/platform"
 )
 
@@ -10,5 +11,5 @@ var dist embed.FS
 
 func main() {
 	//platform.StartHttpServer(Routes)
-	platform.StartHttpServerWithHtmlHosting(Routes, dist)
+	platform.StartHttpServerWithWeb(Routes, dist)
 }

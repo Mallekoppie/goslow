@@ -7,6 +7,8 @@ import (
 )
 
 func TestWriteLogs(t *testing.T) {
+	resetPlatformState(t)
+
 	Log.Info("test",
 		zap.String("field", "value"))
 	Log.Error("This is an error")

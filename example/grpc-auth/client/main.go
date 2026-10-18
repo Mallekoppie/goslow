@@ -2,20 +2,19 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
 	"grpc-client/gen"
+	"grpc-client/gen/genconnect"
 
-	p "github.com/Mallekoppie/goslow/platform"
+	"connectrpc.com/connect"
+	"github.com/Mallekoppie/goslow/platform"
 	"go.uber.org/zap"
-	"golang.org/x/oauth2"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/oauth"
 )
 
 func main() {
@@ -27,38 +26,39 @@ func main() {
 	if !certPool.AppendCertsFromPEM(certBytes) {
 		log.Fatalf("failed to append server certificate to pool")
 	}
-	creds := credentials.NewClientTLSFromCert(certPool, "localhost")
 
-	conn, err := grpc.NewClient("127.0.0.1:9001", grpc.WithTransportCredentials(creds))
-	if err != nil {
-		log.Fatalf("did not connect: %v", err)
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig:   &tls.Config{RootCAs: certPool, ServerName: "localhost"},
+			ForceAttemptHTTP2: true, // required for the gRPC protocol
+		},
 	}
-	defer conn.Close()
 
-	client := gen.NewHelloServiceClient(conn)
+	// WithGRPC makes the connect client speak the native gRPC protocol, proving
+	// the server is gRPC compatible without importing google.golang.org/grpc.
+	client := genconnect.NewHelloServiceClient(httpClient, "https://127.0.0.1:9001", connect.WithGRPC())
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	loginResponse, err := client.Login(ctx, &gen.LoginRequest{Username: "user", Password: "pass"})
+	loginResponse, err := client.Login(ctx, connect.NewRequest(&gen.LoginRequest{Username: "user", Password: "pass"}))
 	if err != nil {
-		p.Log.Error("failed to login", zap.Error(err))
+		platform.Log.Error("failed to login", zap.Error(err))
 		return
 	}
-	if loginResponse.Success {
-		p.Log.Info("Login successful", zap.String("token", loginResponse.Token))
-	} else {
-		p.Log.Error("Login failed", zap.String("message", loginResponse.Message))
+	if !loginResponse.Msg.Success {
+		platform.Log.Error("Login failed", zap.String("message", loginResponse.Msg.Message))
 		return
 	}
+	platform.Log.Info("Login successful", zap.String("token", platform.RedactToken(loginResponse.Msg.Token)))
 
-	callOption := grpc.PerRPCCredentials(oauth.TokenSource{TokenSource: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: loginResponse.Token})})
-	response, err := client.SayHello(ctx, &gen.HelloRequest{Name: "World"}, callOption)
+	helloRequest := connect.NewRequest(&gen.HelloRequest{Name: "World"})
+	helloRequest.Header().Set("Authorization", "Bearer "+loginResponse.Msg.Token)
+
+	response, err := client.SayHello(ctx, helloRequest)
 	if err != nil {
-		p.Log.Error("failed to say hello", zap.Error(err))
+		platform.Log.Error("failed to say hello", zap.Error(err))
 		return
 	}
-	p.Log.Info("response received", zap.String("message", response.Result))
-
-	// p.Log.Info("response received", zap.String("message", response.Message))
+	platform.Log.Info("response received", zap.String("message", response.Msg.Result))
 }

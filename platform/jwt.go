@@ -13,32 +13,36 @@ var (
 	ErrLocalJwtNotEnabled                 = errors.New("local JWT authentication is not enabled in the configuration")
 	ErrLocalJwtSigningKeyNotConfigured    = errors.New("JWT signing key is not configured")
 	ErrLocalJwtSigningMethodNotConfigured = errors.New("JWT signing method is not configured or invalid")
-
-	LocalJwt localJwtOrganizer
+	LocalJwt                              localJwtOrganizer
 )
 
 type localJwtOrganizer struct{}
 
 func localJwtConfigChecks() (jwt.SigningMethod, []byte, error) {
-	if !internalConfig.Auth.Server.LocalJwt.Enabled {
-		Log.Error("Local JWT authentication is not enabled in the configuration")
+	cfg, err := GetPlatformConfiguration()
+	if err != nil || cfg == nil {
+		return nil, nil, err
+	}
+	if !cfg.Auth.Server.LocalJwt.Enabled {
+		if Log != nil {
+			Log.Error("Local JWT authentication is not enabled in the configuration")
+		}
 		return nil, nil, ErrLocalJwtNotEnabled
 	}
-
-	if len(internalConfig.Auth.Server.LocalJwt.JwtSigningKey) == 0 {
-		Log.Error("JWT signing key is not configured")
+	if len(cfg.Auth.Server.LocalJwt.JwtSigningKey) == 0 {
+		if Log != nil {
+			Log.Error("JWT signing key is not configured")
+		}
 		return nil, nil, ErrLocalJwtSigningKeyNotConfigured
 	}
-
-	if len(internalConfig.Auth.Server.LocalJwt.JwtSigningMethod) == 0 || (internalConfig.Auth.Server.LocalJwt.JwtSigningMethod != "HS256" &&
-		internalConfig.Auth.Server.LocalJwt.JwtSigningMethod != "HS384" &&
-		internalConfig.Auth.Server.LocalJwt.JwtSigningMethod != "HS512") {
-		Log.Error("JWT signing method is not configured or invalid")
+	if len(cfg.Auth.Server.LocalJwt.JwtSigningMethod) == 0 || (cfg.Auth.Server.LocalJwt.JwtSigningMethod != "HS256" && cfg.Auth.Server.LocalJwt.JwtSigningMethod != "HS384" && cfg.Auth.Server.LocalJwt.JwtSigningMethod != "HS512") {
+		if Log != nil {
+			Log.Error("JWT signing method is not configured or invalid")
+		}
 		return nil, nil, ErrLocalJwtSigningMethodNotConfigured
 	}
-
 	var signingMethod jwt.SigningMethod
-	switch internalConfig.Auth.Server.LocalJwt.JwtSigningMethod {
+	switch cfg.Auth.Server.LocalJwt.JwtSigningMethod {
 	case "HS256":
 		signingMethod = jwt.SigningMethodHS256
 	case "HS384":
@@ -46,74 +50,95 @@ func localJwtConfigChecks() (jwt.SigningMethod, []byte, error) {
 	case "HS512":
 		signingMethod = jwt.SigningMethodHS512
 	}
-
-	key := []byte(internalConfig.Auth.Server.LocalJwt.JwtSigningKey)
-
-	return signingMethod, key, nil
+	return signingMethod, []byte(cfg.Auth.Server.LocalJwt.JwtSigningKey), nil
 }
 
-func (l localJwtOrganizer) NewLocalJwtToken(claims map[string](interface{})) (string, error) {
+func redactToken(token string) string {
+	if len(token) <= 8 {
+		return "[redacted]"
+	}
+	return token[:8] + "..."
+}
+
+// RedactToken returns a log-safe token prefix. Use it instead of logging raw
+// credentials.
+func RedactToken(token string) string {
+	return redactToken(token)
+}
+
+func (l localJwtOrganizer) NewLocalJwtToken(claims map[string]interface{}) (string, error) {
 	signingMethod, key, err := localJwtConfigChecks()
 	if err != nil {
-		Log.Error("Local JWT checks failed for token creation", zap.Error(err))
+		if Log != nil {
+			Log.Error("Local JWT checks failed for token creation", zap.Error(err))
+		}
 		return "", err
 	}
-
 	claimsForToken := jwt.MapClaims{}
-	for key, value := range claims {
-		claimsForToken[key] = value
+	for k, v := range claims {
+		claimsForToken[k] = v
 	}
-
-	// Add standard claims
-	claimsForToken["iat"] = time.Now().Unix() // Issued at time
-	if internalConfig.Auth.Server.LocalJwt.JwtExpiration > 0 {
-		claimsForToken["exp"] = time.Now().Add(time.Duration(internalConfig.Auth.Server.LocalJwt.JwtExpiration) * time.Minute).Unix()
+	claimsForToken["iat"] = time.Now().Unix()
+	cfg, _ := GetPlatformConfiguration()
+	if cfg != nil && cfg.Auth.Server.LocalJwt.JwtExpiration > 0 {
+		claimsForToken["exp"] = time.Now().Add(time.Duration(cfg.Auth.Server.LocalJwt.JwtExpiration) * time.Minute).Unix()
 	}
-
 	token := jwt.NewWithClaims(signingMethod, claimsForToken)
 	signedToken, err := token.SignedString(key)
 	if err != nil {
-		Log.Error("Error signing token", zap.Error(err))
+		if Log != nil {
+			Log.Error("Error signing token", zap.Error(err))
+		}
 		return "", err
 	}
-
 	return signedToken, nil
 }
 
 func (l localJwtOrganizer) ValidateLocalJwtToken(tokenString string) (map[string]interface{}, error) {
 	signingMethod, key, err := localJwtConfigChecks()
 	if err != nil {
-		Log.Error("Local JWT checks failed for Validation", zap.Error(err))
+		if Log != nil {
+			Log.Error("Local JWT checks failed for Validation", zap.Error(err))
+		}
 		return nil, err
 	}
-
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return key, nil
-	}, jwt.WithValidMethods([]string{signingMethod.Alg()}))
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) { return key, nil }, jwt.WithValidMethods([]string{signingMethod.Alg()}))
 	if err != nil {
-		if err == jwt.ErrTokenExpired {
-			Log.Error("JWT token has expired", zap.Error(err))
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			if Log != nil {
+				Log.Debug("JWT token has expired", zap.Error(err))
+			}
 			return nil, jwt.ErrTokenExpired
-		} else if err == jwt.ErrSignatureInvalid {
-			Log.Error("JWT token signature is invalid")
+		}
+		if errors.Is(err, jwt.ErrSignatureInvalid) {
+			if Log != nil {
+				Log.Debug("JWT token signature is invalid for this verifier")
+			}
 			return nil, jwt.ErrSignatureInvalid
 		}
-		Log.Error("Error parsing local Jwt token", zap.Error(err))
+		if Log != nil {
+			Log.Debug("Unable to parse local JWT token", zap.Error(err))
+		}
 		return nil, err
 	}
-
 	if !token.Valid {
-		Log.Error("Invalid JWT token", zap.String("token", tokenString))
+		if Log != nil {
+			Log.Debug("Invalid JWT token", zap.String("token", redactToken(tokenString)))
+		}
 		return nil, ErrLocalJwtInvalidToken
 	}
-
-	if claims, ok := token.Claims.(jwt.MapClaims); !ok {
-		Log.Error("Token claims are not of type jwt.MapClaims", zap.String("token", tokenString))
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		if Log != nil {
+			Log.Debug("Token claims are not of type jwt.MapClaims", zap.String("token", redactToken(tokenString)))
+		}
 		return nil, ErrLocalJwtInvalidToken
-	} else if len(claims) == 0 {
-		Log.Error("Token claims are empty", zap.String("token", tokenString))
-		return nil, ErrLocalJwtInvalidToken
-	} else {
-		return claims, nil
 	}
+	if len(claims) == 0 {
+		if Log != nil {
+			Log.Debug("Token claims are empty", zap.String("token", redactToken(tokenString)))
+		}
+		return nil, ErrLocalJwtInvalidToken
+	}
+	return claims, nil
 }

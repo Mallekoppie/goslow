@@ -1,48 +1,34 @@
 package platform
 
 import (
-	"log"
 	"os"
 	"testing"
 )
 
 func TestStoreAndReadObjectInBoltDB(t *testing.T) {
-	os.Remove("./database.db")
-	os.Remove("./database.db.lock")
-
-	// db, err := InitializePlatformDatabases()
-	// if err != nil {
-	// 	t.Fail()
-	// }
-	// defer db.BoltDb.Close()
+	withTestDB(t)
 
 	bucketName := "test"
 	id := "123123"
-	initailobject := testObject{
+	initialObject := testObject{
 		Id:      id,
 		Name:    "Test name",
 		Surname: "Test surname",
 	}
 
 	Log.Debug("Calling SaveObject from test")
-	err := Database.BoltDb.SaveObject("test", id, initailobject)
-	if err != nil {
-		log.Println("Error saving object: ", err.Error())
-		t.Fail()
+	if err := Database.BoltDb.SaveObject(bucketName, id, initialObject); err != nil {
+		t.Fatalf("SaveObject failed: %v", err)
 	}
 
 	resultObject := testObject{}
-	err = Database.BoltDb.ReadObject(bucketName, id, &resultObject)
-	if err != nil {
-		log.Println("Error reading object from DB: ", err.Error())
-		t.Fail()
+	if err := Database.BoltDb.ReadObject(bucketName, id, &resultObject); err != nil {
+		t.Fatalf("ReadObject failed: %v", err)
 	}
 
-	if initailobject.Id != resultObject.Id {
-		log.Println("Objects aren't the same. Test failing")
-		t.Fail()
+	if initialObject != resultObject {
+		t.Fatalf("expected %+v, got %+v", initialObject, resultObject)
 	}
-
 }
 
 type testObject struct {
@@ -52,38 +38,30 @@ type testObject struct {
 }
 
 func TestDBCleanup(t *testing.T) {
+	path := withTestDB(t)
 
-	var testItem = testObject{
+	testItem := testObject{
 		Id:      "testItem",
 		Name:    "Test Name",
 		Surname: "Test Surname",
 	}
 
-	err := Database.BoltDb.SaveObject("test", "testItem", testItem)
-	if err != nil {
-		log.Println("Error saving test item: ", err.Error())
-		t.Fail()
+	if err := Database.BoltDb.SaveObject("test", "testItem", testItem); err != nil {
+		t.Fatalf("SaveObject failed: %v", err)
 	}
 
-	var resultObject = testObject{}
-	err = Database.BoltDb.ReadObject("test", "testItem", &resultObject)
-	if err != nil {
-		log.Println("Error reading test item: ", err.Error())
-		t.Fail()
+	resultObject := testObject{}
+	if err := Database.BoltDb.ReadObject("test", "testItem", &resultObject); err != nil {
+		t.Fatalf("ReadObject failed: %v", err)
 	}
 	if resultObject.Id != "testItem" {
-		log.Println("Test item not found in DB")
-		t.Fail()
+		t.Fatalf("expected testItem, got %q", resultObject.Id)
 	}
 
-	err = Database.BoltDb.RemoveDBFile()
-	if err != nil {
-		log.Println("Error removing DB file: ", err.Error())
-		t.Fail()
+	if err := DeleteDatabase(path); err != nil {
+		t.Fatalf("DeleteDatabase failed: %v", err)
 	}
-	if _, err := os.Stat(internalConfig.Database.BoltDB.FileName); !os.IsNotExist(err) {
-		log.Println("DB file still exists after cleanup")
-		t.Fail()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected DB file %q to be removed, stat err=%v", path, err)
 	}
-
 }

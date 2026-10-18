@@ -11,7 +11,7 @@ import (
 func HelloWorld(w http.ResponseWriter, r *http.Request) {
 	p.Log.Info("We arrived at a new world!!!!")
 
-	clientToken := r.Context().Value(p.ContextOAuthClientToken).(string)
+	clientToken := p.ClientTokenFromContext(r.Context())
 
 	if len(clientToken) < 1 {
 		w.WriteHeader(http.StatusBadRequest)

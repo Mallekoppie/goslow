@@ -27,3 +27,4 @@ example/grpc-web-server/client/client
 example/grpc-web-server/server/server
 example/grpc-web-server/server/grpc-server
 .vscode/*
+example/boltdb/boltdb

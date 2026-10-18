@@ -1,14 +1,23 @@
 package platform
 
 import (
+	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 )
+
+const httpShutdownTimeout = 10 * time.Second
 
 func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 	router := mux.NewRouter().StrictSlash(true)
@@ -18,43 +27,69 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 		return nil, err
 	}
 
+	// Request ID runs first so the recovery handler can report it.
+	router.Use(requestIDMiddleware, recoveryMiddleware)
+
+	matcher, err := publicPaths(conf)
+	if err != nil {
+		return nil, err
+	}
+
 	for index := range serviceRoutes {
 		route := serviceRoutes[index]
 		var handler http.Handler
 		handler = route.HandlerFunc
 
-		// Add the middleware components. The are executed from the bottom up
-		// handler = middleware.AllowedContentType(handler, route.AllowedContentType)
-
-		// TODO: Check if enabled before adding these
-		handler = loggingMiddleware(handler, route.SlaMs)
-
-		if conf.Auth.Server.Basic.Enabled && route.AuthRequired {
-			handler = basicAuthMiddleware(handler, conf.Auth.Server.Basic.AllowedUsers)
+		// Middleware is applied from the inside out.
+		if route.AllowedContentType != "" {
+			handler = allowedContentTypeMiddleware(handler, route.AllowedContentType)
 		}
 
-		if conf.Auth.Server.OAuth.Enabled && route.AuthRequired {
-			handler = oAuth2Middleware(handler, route.RolesRequired)
+		excluded := matcher.matches(route.Method, route.Path)
+		if excluded {
+			if route.Auth.Enabled() {
+				return nil, fmt.Errorf("route %s %s declares auth %q but is also in the unauthenticated exclusion list", route.Method, route.Path, route.Auth)
+			}
+			route.Auth = AuthNone
 		}
 
-		if conf.Auth.Server.LocalJwt.Enabled && route.AuthRequired {
-			handler = localJwtAuthMiddleware(handler)
+		strategies, err := routeAuthStrategies(route)
+		if err != nil {
+			return nil, err
 		}
 
-		if conf.HTTP.Server.AllowCorsForLocalDevelopment {
-			handler = AllowCorsForLocalDevelopment(handler)
+		verifiers := make([]authVerifier, 0, len(strategies))
+		for _, strategy := range strategies {
+			verifier, err := authStrategyVerifier(conf, strategy, route.RolesRequired)
+			if err != nil {
+				return nil, err
+			}
+			verifiers = append(verifiers, verifier)
+		}
 
+		if len(verifiers) > 0 {
+			if route.Auth == AuthLocalOrOIDC {
+				handler = anyAuthMiddleware(handler, verifiers...)
+			} else {
+				handler = allAuthMiddleware(handler, verifiers...)
+			}
+		}
+
+		// Logging wraps auth so 401/403 responses are logged and counted.
+		handler = loggingMiddleware(handler, route.Path, route.SlaMs)
+
+		// HTTP routes are bounded by http.server.writetimeoutseconds. Connect
+		// RPCs bypass this middleware, so streaming responses stay open.
+		handler = boundHTTPRouteWrites(handler, seconds(conf.HTTP.Server.WriteTimeoutSeconds))
+
+		if len(conf.HTTP.Server.AllowedOrigins) > 0 {
+			handler = corsMiddleware(handler, conf.HTTP.Server.AllowedOrigins, false)
 			if route.Method != http.MethodOptions {
 				router.
 					Path(route.Path).
 					Methods(http.MethodOptions).
-					Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-						w.Header().Add("Access-Control-Allow-Origin", "*")
-						w.Header().Add("Access-Control-Allow-Methods", "*")
-						w.Header().Add("Access-Control-Allow-Headers", "*")
-					}))
+					Handler(corsMiddleware(http.NotFoundHandler(), conf.HTTP.Server.AllowedOrigins, false))
 			}
-
 		}
 
 		router.
@@ -66,59 +101,135 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 	return router, nil
 }
 
+// boundHTTPRouteWrites caps how long a single HTTP route may take to produce
+// its response. When the deadline elapses the caller receives 503 and the
+// handler is abandoned. Non-positive durations disable the bound.
+func boundHTTPRouteWrites(next http.Handler, timeout time.Duration) http.Handler {
+	if timeout <= 0 {
+		return next
+	}
+	return http.TimeoutHandler(next, timeout, `{"error":"request timeout"}`)
+}
+
+// configureHTTPProtocols enables HTTP/1.1 plus HTTP/2: ALPN over TLS, and
+// unencrypted HTTP/2 (h2c) on plaintext listeners so native gRPC clients work.
+func configureHTTPProtocols(server *http.Server, tlsEnabled bool) {
+	if server == nil {
+		return
+	}
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	if tlsEnabled {
+		protocols.SetHTTP2(true)
+	} else {
+		protocols.SetUnencryptedHTTP2(true)
+	}
+	server.Protocols = protocols
+}
+
+// newHTTPServer builds the server with the configured timeouts.
+func newHTTPServer(conf *Config, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              conf.HTTP.Server.ListeningAddress,
+		Handler:           handler,
+		ReadHeaderTimeout: time.Duration(conf.HTTP.Server.ReadHeaderTimeoutSeconds) * time.Second,
+		ReadTimeout:       time.Duration(conf.HTTP.Server.ReadTimeoutSeconds) * time.Second,
+		WriteTimeout:      time.Duration(conf.HTTP.Server.WriteTimeoutSeconds) * time.Second,
+		IdleTimeout:       time.Duration(conf.HTTP.Server.IdleTimeoutSeconds) * time.Second,
+	}
+}
+
+// serveHTTPServer serves until the context is cancelled, then shuts down
+// gracefully. http.ErrServerClosed is treated as a clean exit.
+func serveHTTPServer(ctx context.Context, server *http.Server, listener net.Listener, tlsEnabled bool, certFile, keyFile string) error {
+	configureHTTPProtocols(server, tlsEnabled)
+
+	serveErrors := make(chan error, 1)
+	go func() {
+		var err error
+		if tlsEnabled {
+			err = server.ServeTLS(listener, certFile, keyFile)
+		} else {
+			err = server.Serve(listener)
+		}
+		serveErrors <- err
+	}()
+
+	select {
+	case err := <-serveErrors:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			Log.Error("HTTP server stopped unexpectedly", zap.Error(err))
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
+		defer cancel()
+
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			Log.Error("HTTP server shutdown failed", zap.Error(err))
+			return err
+		}
+
+		if err := <-serveErrors; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			Log.Error("HTTP server stopped with error during shutdown", zap.Error(err))
+			return err
+		}
+		return nil
+	}
+}
+
 func startHttpServerInternal(router *mux.Router) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return serveRoutes(ctx, router)
+}
+
+func serveRoutes(ctx context.Context, router *mux.Router) error {
 	config, err := GetPlatformConfiguration()
 	if err != nil {
 		Log.Error("Error reading platform configuration", zap.Error(err))
 		return err
 	}
 
-	// Do this for each database we add
-	if config.Database.BoltDB.Enabled {
-		defer Database.BoltDb.Close()
+	if err := ValidateServingConfiguration(config); err != nil {
+		Log.Error("Invalid serving configuration", zap.Error(err))
+		return err
 	}
 
-	Log.Info("Starting new HTTP server", zap.String("ListeingAddress", config.HTTP.Server.ListeningAddress))
-	if config.HTTP.Server.TLSEnabled {
-		Log.Error("TLS Server stopped: ", zap.Error(
-			http.ListenAndServeTLS(config.HTTP.Server.ListeningAddress,
-				config.HTTP.Server.TLSCertFileName,
-				config.HTTP.Server.TLSKeyFileName,
-				router)))
-	} else {
-		Log.Error("HTTP Server stopped: ", zap.Error(
-			http.ListenAndServe(config.HTTP.Server.ListeningAddress, router)))
+	listener, err := net.Listen("tcp", config.HTTP.Server.ListeningAddress)
+	if err != nil {
+		Log.Error("Unable to listen for HTTP traffic", zap.Error(err))
+		return err
 	}
+	defer listener.Close()
 
-	return nil
+	Log.Info("Starting new HTTP server", zap.String("ListeningAddress", config.HTTP.Server.ListeningAddress))
+
+	startMetricsServerIfEnabled(ctx, config)
+
+	return serveHTTPServer(ctx, newHTTPServer(config, router), listener,
+		config.HTTP.Server.TLSEnabled, config.HTTP.Server.TLSCertFileName, config.HTTP.Server.TLSKeyFileName)
 }
 
 func StartHttpServer(routes Routes) error {
-	router, err := newRouter(routes)
-	if err != nil {
-		Log.Error("Error starting HTTP server", zap.Error(err))
-		return err
-	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	return startHttpServerInternal(router)
+	return StartHttpServerWithContext(ctx, routes)
 }
 
-// Deprecated: Use StartHttpServerWithWeb
-func StartHttpServerWithHtmlHosting(routes Routes, dist embed.FS) error {
+// StartHttpServerWithContext starts the HTTP server and shuts it down gracefully
+// when the context is cancelled.
+func StartHttpServerWithContext(ctx context.Context, routes Routes) error {
 	router, err := newRouter(routes)
 	if err != nil {
 		Log.Error("Error starting HTTP server", zap.Error(err))
 		return err
 	}
 
-	stripped, err := fs.Sub(dist, "dist")
-	if err != nil {
-		fmt.Println("Error stripping frontend")
-	}
-	fileServer := http.FileServer(http.FS(stripped))
-	router.PathPrefix("/").Handler(fileServer)
-
-	return startHttpServerInternal(router)
+	return serveRoutes(ctx, router)
 }
 
 func StartHttpServerWithWeb(routes Routes, dist embed.FS) error {
@@ -130,7 +241,8 @@ func StartHttpServerWithWeb(routes Routes, dist embed.FS) error {
 
 	stripped, err := fs.Sub(dist, "dist")
 	if err != nil {
-		fmt.Println("Error stripping frontend")
+		Log.Error("Error stripping frontend", zap.Error(err))
+		return err
 	}
 	fileServer := http.FileServer(http.FS(stripped))
 	router.PathPrefix("/").Handler(fileServer)
@@ -145,7 +257,7 @@ type Route struct {
 	SlaMs              int64
 	RolesRequired      []string
 	AllowedContentType string
-	AuthRequired       bool
+	Auth               AuthStrategy
 }
 
 type Routes []Route

@@ -2,10 +2,10 @@ package platform
 
 import (
 	"errors"
-	"log"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -13,112 +13,128 @@ import (
 )
 
 var (
-	internaLoggerlLock sync.Mutex
+	// Log is a stable handle for the process lifetime. Its underlying zap
+	// logger is swapped atomically by ConfigureLoggerWithConfig, so concurrent
+	// logging and reconfiguration are race free. Before the first configuration
+	// every method is a safe no-op.
+	Log = &Logger{}
 
-	Log                *Logger
 	ErrInvalidLogLevel = errors.New("incorrect log level: unable to translate to zap log level")
 )
 
 type Logger struct {
-	internalLogger *zap.Logger
+	current atomic.Pointer[zap.Logger]
+}
+
+func (l *Logger) logger() *zap.Logger {
+	if l == nil {
+		return nil
+	}
+	return l.current.Load()
 }
 
 func (l *Logger) Info(msg string, fields ...zap.Field) {
-	l.internalLogger.Info(msg, fields...)
+	if logger := l.logger(); logger != nil {
+		logger.Info(msg, fields...)
+	}
 }
 
 func (l *Logger) Error(msg string, fields ...zap.Field) {
-	l.internalLogger.Error(msg, fields...)
+	if logger := l.logger(); logger != nil {
+		logger.Error(msg, fields...)
+	}
 }
 
 func (l *Logger) Debug(msg string, fields ...zap.Field) {
-	l.internalLogger.Debug(msg, fields...)
+	if logger := l.logger(); logger != nil {
+		logger.Debug(msg, fields...)
+	}
 }
 
 func (l *Logger) Warn(msg string, fields ...zap.Field) {
-	l.internalLogger.Warn(msg, fields...)
-}
-
-func init() {
-	InitializeLogger()
-}
-
-func InitializeLogger() {
-	if Log == nil {
-		internaLoggerlLock.Lock()
-		if Log == nil {
-			log.Println("Creating new logger")
-
-			platformConfig, err := GetPlatformConfiguration()
-			if err != nil {
-				log.Println("Unable to get Platform configuration: ", err.Error())
-				panic(err.Error())
-			}
-
-			logLevel, err := logLevelStringToZapType(platformConfig.Log.Level)
-			if err != nil {
-				log.Fatalln("Unable to convert config log level to internal log level: ", err.Error())
-			}
-
-			// Log Rotation
-			fileWriter := zapcore.AddSync(&lumberjack.Logger{
-				Filename:   platformConfig.Log.FilePath,
-				MaxSize:    platformConfig.Log.MaxSize,
-				MaxAge:     platformConfig.Log.MaxAge,
-				MaxBackups: platformConfig.Log.MaxBackups,
-			})
-
-			consoleWriter := zapcore.Lock(os.Stdout)
-
-			encoderConfig := zap.NewProductionEncoderConfig()
-			encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-			jsonEncoder := zapcore.NewJSONEncoder(encoderConfig)
-
-			zapCores := []zapcore.Core{}
-			// Only log to file if file logging is enabled
-			if platformConfig.Log.FileLoggingEnabled {
-				zapCores = append(zapCores, zapcore.NewCore(jsonEncoder, fileWriter, logLevel))
-			}
-			zapCores = append(zapCores, zapcore.NewCore(jsonEncoder, consoleWriter, logLevel))
-
-			coreTree := zapcore.NewTee(zapCores...)
-
-			newLogger := zap.New(coreTree, zap.AddCaller(), zap.AddCallerSkip(1))
-			newLogger = newLogger.With(zap.Field{
-				Key:    "component",
-				Type:   zapcore.StringType,
-				String: platformConfig.Component.ComponentName,
-			})
-
-			Log = &Logger{
-				internalLogger: newLogger,
-			}
-		} else {
-			internaLoggerlLock.Unlock()
-		}
+	if logger := l.logger(); logger != nil {
+		logger.Warn(msg, fields...)
 	}
+}
+
+// InitializeLogger loads configuration (if needed) and configures the logger.
+// It is idempotent and safe to call before any logging happens.
+func InitializeLogger() error {
+	cfg, err := GetPlatformConfiguration()
+	if err != nil {
+		return err
+	}
+	return ConfigureLoggerWithConfig(cfg)
+}
+
+// ConfigureLogger reconfigures the logger from the current platform config.
+func ConfigureLogger() error {
+	cfg, err := GetPlatformConfiguration()
+	if err != nil {
+		return err
+	}
+	return ConfigureLoggerWithConfig(cfg)
+}
+
+var configureLoggerLock sync.Mutex
+
+// ConfigureLoggerWithConfig swaps the underlying logger atomically. It validates
+// the configured level and returns ErrInvalidLogLevel instead of silently
+// falling back.
+func ConfigureLoggerWithConfig(cfg *Config) error {
+	if cfg == nil {
+		cfg = createDefaultConfiguration()
+	}
+
+	level, err := logLevelStringToZapType(cfg.Log.Level)
+	if err != nil {
+		return err
+	}
+
+	encoderConfig := zap.NewProductionEncoderConfig()
+	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	jsonEncoder := zapcore.NewJSONEncoder(encoderConfig)
+	consoleWriter := zapcore.Lock(os.Stdout)
+	zapCores := []zapcore.Core{zapcore.NewCore(jsonEncoder, consoleWriter, level)}
+
+	if cfg.Log.FileLoggingEnabled {
+		fileWriter := zapcore.AddSync(&lumberjack.Logger{
+			Filename:   cfg.Log.FilePath,
+			MaxSize:    cfg.Log.MaxSize,
+			MaxAge:     cfg.Log.MaxAge,
+			MaxBackups: cfg.Log.MaxBackups,
+		})
+		zapCores = append(zapCores, zapcore.NewCore(jsonEncoder, fileWriter, level))
+	}
+
+	newLogger := zap.New(zapcore.NewTee(zapCores...), zap.AddCaller(), zap.AddCallerSkip(1))
+	newLogger = newLogger.With(zap.Field{Key: "component", Type: zapcore.StringType, String: cfg.Component.ComponentName})
+
+	configureLoggerLock.Lock()
+	Log.current.Store(newLogger)
+	configureLoggerLock.Unlock()
+	return nil
 }
 
 func logLevelStringToZapType(input string) (zap.AtomicLevel, error) {
-	input = strings.ToLower(input)
-	var result zap.AtomicLevel
-
+	input = strings.ToLower(strings.TrimSpace(input))
+	if input == "" {
+		return zap.NewAtomicLevelAt(zap.InfoLevel), nil
+	}
 	switch input {
 	case "debug":
-		result = zap.NewAtomicLevelAt(zap.DebugLevel)
+		return zap.NewAtomicLevelAt(zap.DebugLevel), nil
 	case "info":
-		result = zap.NewAtomicLevelAt(zap.InfoLevel)
-	case "warn":
-		result = zap.NewAtomicLevelAt(zap.WarnLevel)
+		return zap.NewAtomicLevelAt(zap.InfoLevel), nil
+	case "warn", "warning":
+		return zap.NewAtomicLevelAt(zap.WarnLevel), nil
 	case "error":
-		result = zap.NewAtomicLevelAt(zap.ErrorLevel)
+		return zap.NewAtomicLevelAt(zap.ErrorLevel), nil
 	case "fatal":
-		result = zap.NewAtomicLevelAt(zap.FatalLevel)
+		return zap.NewAtomicLevelAt(zap.FatalLevel), nil
 	case "panic":
-		result = zap.NewAtomicLevelAt(zap.PanicLevel)
+		return zap.NewAtomicLevelAt(zap.PanicLevel), nil
 	default:
-		result = zap.NewAtomicLevelAt(zap.InfoLevel)
+		return zap.NewAtomicLevelAt(zap.InfoLevel), ErrInvalidLogLevel
 	}
-
-	return result, nil
 }

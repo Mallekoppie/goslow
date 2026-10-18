@@ -3,33 +3,38 @@ package main
 import (
 	"context"
 	"embed"
+	"io/fs"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"grpc-server/gen"
+	"grpc-server/gen/genconnect"
 
+	"connectrpc.com/connect"
 	p "github.com/Mallekoppie/goslow/platform"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 //go:embed ui/*
 var uiAssets embed.FS
 
-type Server struct {
-	gen.UnimplementedHelloServiceServer
+// Server implements the generated Connect handler. The embedded Flutter assets
+// and the RPC endpoints are served on the same origin.
+type Server struct{}
+
+func (s *Server) SayHello(ctx context.Context, request *connect.Request[gen.HelloRequest]) (*connect.Response[gen.HelloResponse], error) {
+	p.Log.Info("Received SayHello request", zap.String("name", request.Msg.Name))
+	return connect.NewResponse(&gen.HelloResponse{Result: "Hello " + request.Msg.Name}), nil
 }
 
-func (s *Server) Register(server *grpc.Server) {
-	gen.RegisterHelloServiceServer(server, s)
-}
-
-func (s *Server) SayHello(ctx context.Context, req *gen.HelloRequest) (*gen.HelloResponse, error) {
-
-	p.Log.Info("Received SayHello request", zap.String("name", req.Name))
-	return &gen.HelloResponse{Result: "Hello " + req.Name}, nil
+func (s *Server) Register(mux *http.ServeMux, options ...connect.HandlerOption) {
+	prefix, handler := genconnect.NewHelloServiceHandler(s, options...)
+	mux.Handle(prefix, handler)
 }
 
 func main() {
-
 	config := p.Config{}
 	config.Component.ComponentName = "grpc-web"
 	config.Grpc.Server.ListeningAddress = "127.0.0.1:9001"
@@ -39,9 +44,24 @@ func main() {
 
 	p.SetPlatformConfiguration(config)
 
-	services := []p.GRPCService{
+	uiFS, err := fs.Sub(uiAssets, "ui")
+	if err != nil {
+		p.Log.Error("failed to create sub filesystem for ui assets", zap.Error(err))
+		return
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	services := []p.ConnectService{
 		&Server{},
 	}
 
-	p.StartGrpcServerWithWeb(services, "ui", &uiAssets)
+	err = p.StartConnectServerWithContext(ctx, p.ConnectServerOptions{
+		Services:   services,
+		WebHandler: http.FileServer(http.FS(uiFS)),
+	})
+	if err != nil {
+		p.Log.Error("Connect server stopped", zap.Error(err))
+	}
 }

@@ -87,7 +87,7 @@ err := platform.Database.BoltDb.RemoveBucket("users")
 
 ### 8. Remove Database File
 ```go
-err := platform.Database.BoltDb.RemoveDBFile()
+err := platform.DeleteDatabase(config.Database.BoltDB.FileName)
 ```
 
 ## Data Structures
