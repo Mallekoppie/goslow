@@ -71,6 +71,22 @@ platform:
           password: testpassword
   component:
     componentname: Unit Test
+  grpc:
+    server:
+      listeningaddress: 0.0.0.0:9001
+      tlscertfilename: ""
+      tlskeyfilename: ""
+      tlsenabled: false
+      # CORS allow-list for browser gRPC-Web traffic. When empty, the
+      # http.server.AllowCorsForLocalDevelopment flag falls back to "*".
+      allowedorigins: []
+      # Server timeouts in seconds. Omit to use the defaults (5/30/60/120).
+      readheadertimeoutseconds: 5
+      readtimeoutseconds: 30
+      writetimeoutseconds: 60
+      idletimeoutseconds: 120
+      # Maximum request size in bytes. 0 uses the Connect default.
+      maxreceivemessagebytes: 0
   database:
     boltdb:
       enabled: true

@@ -112,11 +112,17 @@ type Config struct {
 
 	Grpc struct {
 		Server struct {
-			ListeningAddress     string
-			TLSCertFileName      string
-			TLSKeyFileName       string
-			TLSEnabled           bool
-			UnAuthenticatedPaths []string
+			ListeningAddress         string
+			TLSCertFileName          string
+			TLSKeyFileName           string
+			TLSEnabled               bool
+			UnAuthenticatedPaths     []string
+			AllowedOrigins           []string
+			ReadHeaderTimeoutSeconds int
+			ReadTimeoutSeconds       int
+			WriteTimeoutSeconds      int
+			IdleTimeoutSeconds       int
+			MaxReceiveMessageBytes   int
 		}
 	}
 
@@ -239,6 +245,18 @@ func (conf *Config) checkPlatformConfiguration() error {
 	}
 	if conf.Auth.Server.OAuth.RolesClaim == "" {
 		conf.Auth.Server.OAuth.RolesClaim = "roles"
+	}
+	if conf.Grpc.Server.ReadHeaderTimeoutSeconds <= 0 {
+		conf.Grpc.Server.ReadHeaderTimeoutSeconds = 5
+	}
+	if conf.Grpc.Server.ReadTimeoutSeconds <= 0 {
+		conf.Grpc.Server.ReadTimeoutSeconds = 30
+	}
+	if conf.Grpc.Server.WriteTimeoutSeconds <= 0 {
+		conf.Grpc.Server.WriteTimeoutSeconds = 60
+	}
+	if conf.Grpc.Server.IdleTimeoutSeconds <= 0 {
+		conf.Grpc.Server.IdleTimeoutSeconds = 120
 	}
 	if conf.Log.FilePath == "" {
 		log.Println("Configuration Log.FiePath is empty. Defaulting to ./default.log")

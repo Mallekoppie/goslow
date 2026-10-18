@@ -38,10 +38,10 @@ ARG GOPLS_VERSION=v0.21.1
 ARG STATICCHECK_VERSION=v0.7.0
 ARG DELVE_VERSION=v1.27.2
 ARG PROTOC_GEN_GO_VERSION=v1.36.12
-ARG PROTOC_GEN_GO_GRPC_VERSION=v1.6.2
+ARG PROTOC_GEN_CONNECT_GO_VERSION=v1.21.0
 
 RUN go install golang.org/x/tools/gopls@${GOPLS_VERSION} \
     && go install honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION} \
     && go install github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION} \
     && go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION} \
-    && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}
+    && go install connectrpc.com/connect/cmd/protoc-gen-connect-go@${PROTOC_GEN_CONNECT_GO_VERSION}

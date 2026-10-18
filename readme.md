@@ -20,9 +20,9 @@ The `platform` directory provides shared infrastructure for all services in the 
   Methods for saving, reading, removing objects and buckets.  
   Controlled by `config.yml` (`platform.database.boltdb`).
 
-- **HTTP & gRPC Server (`httpserver.go`, `grpcserver.go`)**  
-  Helpers to start HTTP/gRPC servers with middleware for logging, CORS, and authentication.  
-  Supports serving static web assets.
+- **HTTP & Connect Server (`httpserver.go`, `connectserver.go`)**  
+  Helpers to start HTTP servers and a Buf Connect server that speaks Connect, gRPC, and gRPC-Web on one origin.  
+  Supports h2c for plaintext native gRPC, CORS/preflight, and embedded web assets.
 
 - **HTTP Client (`httpclient.go`)**  
   Creates HTTP clients with custom config (TLS, timeouts) from `config.yml`.
@@ -30,7 +30,7 @@ The `platform` directory provides shared infrastructure for all services in the 
 - **Authentication (`jwt.go`, `oauth.go`, `middleware.go`)**  
   - Local JWT: Issue and validate tokens for stateless auth.
   - OAuth2: Token management, auto-renewal, and validation (with Vault integration for secrets).
-  - Middleware: HTTP/gRPC interceptors for Basic, OAuth2, and JWT authentication.
+  - Middleware: HTTP middleware and Connect interceptors for OAuth2 and JWT authentication.
 
 - **Vault Integration (`vault.go`)**  
   HashiCorp Vault client for secret management.  
@@ -77,13 +77,22 @@ Demonstrates how a client token is forwarded and validated across multiple servi
 - Server service validates token and then also validates the original client token
 - Server service can now do authorization based on original client token
 
-### gRPC Service Setup (grpc, grpc-auth, grpc-web-server)
+### gRPC-Compatible Service Setup (grpc-auth, grpc-web-server)
 
-**Protobuf Setup:**
+The platform serves RPCs with [Buf Connect](https://connectrpc.com), not grpc-go.
+Connect handlers speak the Connect, gRPC, and gRPC-Web protocols, so browser
+clients, native gRPC clients, and `grpcurl` all work against the same listener.
+
+**Code generation:**
 - Install tools:
-  - WSL: `sudo apt install -y protobuf-compiler && go install google.golang.org/protobuf/cmd/protoc-gen-go@latest`
-  - Windows: `winget install protobuf && go install google.golang.org/protobuf/cmd/protoc-gen-go@latest`
-- Use provided Makefile for code generation.
+  - WSL: `sudo apt install -y protobuf-compiler && go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest`
+  - Windows: `winget install protobuf && go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest`
+- Run `make gen` in the example. The generated `genconnect` package is what
+  `platform.ConnectService` registers.
+
+**Upstream note:** Connect replaces the archived `improbable-eng/grpc-web`
+wrapper that used to be needed for gRPC-Web. Record any upstream replacement and
+its migration path here before removing this dependency.
 
 **Manual API Testing:**
 - List services:  
@@ -189,83 +198,122 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-### gRPC Hosting Example
+### Connect Hosting Example (gRPC + gRPC-Web)
 
-Start a gRPC server with one or more services. Each service must implement the `Register` method:
+Each service implements `platform.ConnectService` by mounting the generated
+Connect handler. The same handler answers Connect, gRPC, and gRPC-Web calls:
 
 ```go
 import (
     "context"
-    "google.golang.org/grpc"
+    "net/http"
+    "os"
+    "os/signal"
+    "syscall"
     "github.com/Mallekoppie/goslow/platform"
-    "your/gen/package"
+    "your/gen/genconnect"
+    "connectrpc.com/connect"
+    "go.uber.org/zap"
 )
 
-type Server struct {
-    gen.UnimplementedHelloServiceServer
+type Server struct{}
+
+func (s *Server) SayHello(ctx context.Context, req *connect.Request[gen.HelloRequest]) (*connect.Response[gen.HelloResponse], error) {
+    platform.Log.Info("Received SayHello request", zap.String("name", req.Msg.Name))
+    return connect.NewResponse(&gen.HelloResponse{Result: "Hello " + req.Msg.Name}), nil
 }
 
-// Implement Register to attach your service to the gRPC server
-func (s *Server) Register(server *grpc.Server) {
-    gen.RegisterHelloServiceServer(server, s)
-}
-
-func (s *Server) SayHello(ctx context.Context, req *gen.HelloRequest) (*gen.HelloResponse, error) {
-    platform.Log.Info("Received SayHello request", zap.String("name", req.Name))
-    return &gen.HelloResponse{Result: "Hello " + req.Name}, nil
+func (s *Server) Register(mux *http.ServeMux, options ...connect.HandlerOption) {
+    prefix, handler := genconnect.NewHelloServiceHandler(s, options...)
+    mux.Handle(prefix, handler)
 }
 
 func main() {
-    services := []platform.GRPCService{
-        &Server{},
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+
+    err := platform.StartConnectServerWithContext(ctx, platform.ConnectServerOptions{
+        Services: []platform.ConnectService{&Server{}},
+    })
+    if err != nil {
+        platform.Log.Error("Connect server stopped", zap.Error(err))
     }
-    platform.StartGrpcServer(services)
 }
 ```
 
-### gRPC with Embedded Website Example
+Auth interceptors install automatically from config (local JWT and/or OAuth) for
+unary and streaming RPCs, on TLS and plaintext listeners. `Grpc.Server.UnAuthenticatedPaths`
+bypasses auth for specific procedures. Set `ConnectServerOptions.DisableAuthFromConfig`
+to install your own interceptors instead.
 
-Serve both gRPC and static web assets from the same server. Each service must implement the `Register` method:
+Clients pick the wire protocol: `connect.WithGRPC()` for native gRPC,
+`connect.WithGRPCWeb()` for browsers, or no option for the Connect protocol.
+
+### Connect with Embedded Website Example
+
+Serve RPCs and static assets (for example a Flutter web build) from one origin.
+Non-RPC paths fall through to `WebHandler`:
 
 ```go
 import (
     "context"
     "embed"
-    "google.golang.org/grpc"
+    "io/fs"
+    "net/http"
     "github.com/Mallekoppie/goslow/platform"
-    "your/gen/package"
 )
 
 //go:embed ui/*
 var uiAssets embed.FS
 
-type Server struct {
-    gen.UnimplementedHelloServiceServer
-}
-
-func (s *Server) Register(server *grpc.Server) {
-    gen.RegisterHelloServiceServer(server, s)
-}
-
-func (s *Server) SayHello(ctx context.Context, req *gen.HelloRequest) (*gen.HelloResponse, error) {
-    platform.Log.Info("Received SayHello request", zap.String("name", req.Name))
-    return &gen.HelloResponse{Result: "Hello " + req.Name}, nil
-}
-
 func main() {
     config := platform.Config{}
-    config.Component.ComponentName = "grpc-web"
     config.Grpc.Server.ListeningAddress = "127.0.0.1:9001"
     config.Grpc.Server.TLSCertFileName = "server.crt"
     config.Grpc.Server.TLSKeyFileName = "server.key"
     config.Grpc.Server.TLSEnabled = true
     platform.SetPlatformConfiguration(config)
 
-    services := []platform.GRPCService{
-        &Server{},
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+
+    uiFS, err := fs.Sub(uiAssets, "ui")
+    if err != nil {
+        platform.Log.Error("failed to strip ui assets", zap.Error(err))
+        return
     }
-    platform.StartGrpcServerWithWeb(services, "ui", &uiAssets)
+
+    err = platform.StartConnectServerWithContext(ctx, platform.ConnectServerOptions{
+        Services:   []platform.ConnectService{&Server{}},
+        WebHandler: http.FileServer(http.FS(uiFS)),
+    })
+    if err != nil {
+        platform.Log.Error("Connect server stopped", zap.Error(err))
+    }
 }
+```
+
+Preflight requests are answered with CORS headers from `Grpc.Server.AllowedOrigins`
+(or `*` when `HTTP.Server.AllowCorsForLocalDevelopment` is set). When TLS is
+disabled the handler is wrapped in h2c so native gRPC clients can use plaintext
+HTTP/2.
+
+### Custom Listener
+
+Applications that need to own the listener and `http.Server` can build the
+handler and serve it themselves:
+
+```go
+handler, err := platform.NewConnectHandler(platform.ConnectServerOptions{
+    Services:   []platform.ConnectService{&Server{}},
+    WebHandler: assets,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+server := &http.Server{Addr: ":9001", Handler: handler}
+log.Fatal(server.ListenAndServe())
 ```
 
 ### Configuration: Code vs Config File

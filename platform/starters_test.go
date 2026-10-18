@@ -30,6 +30,7 @@ func TestStartServerHelpersReportListenErrors(t *testing.T) {
 		t.Fatal("expected StartHttpServerWithHtmlHosting to report the listen error")
 	}
 
-	StartGrpcServer(nil)
-	StartGrpcServerWithWeb(nil, "", nil)
+	if err := StartConnectServerWithContext(context.Background(), ConnectServerOptions{}); err == nil {
+		t.Fatal("expected StartConnectServerWithContext to report the listen error")
+	}
 }

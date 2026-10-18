@@ -30,6 +30,11 @@ go version
 protoc --version
 gopls version | head -n 1
 staticcheck -version
+if command -v protoc-gen-connect-go >/dev/null 2>&1; then
+  protoc-gen-connect-go --version 2>/dev/null || echo "    protoc-gen-connect-go installed"
+else
+  echo "    ! protoc-gen-connect-go missing: go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest"
+fi
 
 cat <<'EOF'
 
@@ -37,7 +42,7 @@ cat <<'EOF'
     go test -race ./...                    # root module
     go test -race -tags integration ./...  # tests needing a live IdP/Vault
     go run ./example/boltdb                # BoltDB example
-    make -C example/grpc-auth              # regenerate protobuf stubs
+    make -C example/grpc-auth gen          # regenerate protobuf + Connect stubs
 
 Podman note: if the workspace ends up owned by root inside the container,
 add "--userns=keep-id" to "runArgs" and set "updateRemoteUserUID": false.

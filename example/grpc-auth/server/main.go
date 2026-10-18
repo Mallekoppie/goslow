@@ -2,50 +2,60 @@ package main
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"grpc-server/gen"
+	"grpc-server/gen/genconnect"
 
+	"connectrpc.com/connect"
 	"github.com/Mallekoppie/goslow/platform"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
-func (s *Server) SayHello(ctx context.Context, req *gen.HelloRequest) (*gen.HelloResponse, error) {
-	platform.Log.Info("Received SayHello request", zap.String("name", req.Name))
-	return &gen.HelloResponse{Result: "Hello " + req.Name}, nil
-}
+// Server implements the generated Connect handler interface. Connect serves the
+// same service over Connect, gRPC, and gRPC-Web, so no grpc-go server is needed.
+type Server struct{}
 
-// Implement grpc Login function
-func (s *Server) Login(ctx context.Context, req *gen.LoginRequest) (*gen.LoginResponse, error) {
-	platform.Log.Info("Received Login request", zap.String("username", req.Username))
-	if req.Username == "user" && req.Password == "pass" {
+func (s *Server) Login(ctx context.Context, request *connect.Request[gen.LoginRequest]) (*connect.Response[gen.LoginResponse], error) {
+	platform.Log.Info("Received Login request", zap.String("username", request.Msg.Username))
+
+	if request.Msg.Username == "user" && request.Msg.Password == "pass" {
 		token, err := platform.LocalJwt.NewLocalJwtToken(map[string]interface{}{
-			"username": req.Username,
+			"username": request.Msg.Username,
 		})
 		if err != nil {
 			platform.Log.Error("failed to create token", zap.Error(err))
-			return nil, status.Errorf(codes.Internal, "failed to create token")
+			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create token"))
 		}
 
-		platform.Log.Info("Login successful", zap.String("user", req.Username))
-
-		return &gen.LoginResponse{Token: token, Success: true, Message: "login successful"}, nil
+		platform.Log.Info("Login successful", zap.String("user", request.Msg.Username))
+		return connect.NewResponse(&gen.LoginResponse{
+			Token:   token,
+			Success: true,
+			Message: "login successful",
+		}), nil
 	}
-	return nil, status.Errorf(codes.Unauthenticated, "invalid credentials")
+
+	return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid credentials"))
 }
 
-type Server struct {
-	gen.UnimplementedHelloServiceServer
+func (s *Server) SayHello(ctx context.Context, request *connect.Request[gen.HelloRequest]) (*connect.Response[gen.HelloResponse], error) {
+	platform.Log.Info("Received SayHello request", zap.String("name", request.Msg.Name))
+	return connect.NewResponse(&gen.HelloResponse{Result: "Hello " + request.Msg.Name}), nil
 }
 
-func (s *Server) Register(server *grpc.Server) {
-	gen.RegisterHelloServiceServer(server, s)
+// Register is the platform.ConnectService hook: it mounts the generated Connect
+// handler, which also serves gRPC and gRPC-Web for this service.
+func (s *Server) Register(mux *http.ServeMux, options ...connect.HandlerOption) {
+	prefix, handler := genconnect.NewHelloServiceHandler(s, options...)
+	mux.Handle(prefix, handler)
 }
 
 func main() {
-
 	config := platform.Config{}
 	config.Component.ComponentName = "grpc-auth"
 	config.Grpc.Server.ListeningAddress = "127.0.0.1:9001"
@@ -60,9 +70,14 @@ func main() {
 
 	platform.SetPlatformConfiguration(config)
 
-	services := []platform.GRPCService{
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	services := []platform.ConnectService{
 		&Server{},
 	}
 
-	platform.StartGrpcServer(services)
+	if err := platform.StartConnectServerWithContext(ctx, platform.ConnectServerOptions{Services: services}); err != nil {
+		platform.Log.Error("Connect server stopped", zap.Error(err))
+	}
 }

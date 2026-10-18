@@ -2,41 +2,46 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"log"
+	"net/http"
+	"os"
 	"time"
 
 	"grpc-client/gen"
+	"grpc-client/gen/genconnect"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
+	"connectrpc.com/connect"
 )
 
 func main() {
-	creds, err := credentials.NewClientTLSFromFile("server.crt", "localhost")
+	certBytes, err := os.ReadFile("server.crt")
 	if err != nil {
-		log.Fatalf("failed to create TLS credentials: %v", err)
+		log.Fatalf("failed to read server certificate: %v", err)
+	}
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(certBytes) {
+		log.Fatalf("failed to append server certificate to pool")
 	}
 
-	conn, err := grpc.NewClient("127.0.0.1:9001", grpc.WithTransportCredentials(creds))
-	if err != nil {
-		log.Fatalf("did not connect: %v", err)
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: certPool, ServerName: "localhost"},
+		},
 	}
-	defer conn.Close()
 
-	client := gen.NewHelloServiceClient(conn)
+	// WithGRPCWeb makes the connect client use the browser-facing gRPC-Web
+	// protocol over plain HTTP/1.1.
+	client := genconnect.NewHelloServiceClient(httpClient, "https://127.0.0.1:9001", connect.WithGRPCWeb())
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	state := conn.GetState()
-	log.Printf("gRPC connection state: %v", state)
-
-	response, err := client.SayHello(ctx, &gen.HelloRequest{Name: "World"})
+	response, err := client.SayHello(ctx, connect.NewRequest(&gen.HelloRequest{Name: "World"}))
 	if err != nil {
 		log.Printf("could not greet: %v", err)
 		return
 	}
-	log.Printf("response received: %s", response.Result)
-
-	// platform.Logger.Info("response received", zap.String("message", response.Message))
+	log.Printf("response received: %s", response.Msg.Result)
 }
