@@ -18,8 +18,19 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l . )" || (gofmt -l . && exit 1)
 
+      - name: module tidiness
+        run: go mod tidy -diff
+
+      - name: whitespace
+        run: git diff --check
+
       - name: go vet
         run: go vet ./...
+
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          "$(go env GOPATH)/bin/staticcheck" ./...
 
       - name: unit tests (race)
         run: go test -race ./...

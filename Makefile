@@ -13,7 +13,7 @@ test-race:
 
 # Static checks used by CI.
 vet:
-	gofmt -l .
+	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt required:"; echo "$$out"; exit 1; fi
 	go vet ./...
 
 # Build every example module, which uses the local platform via replace directives.

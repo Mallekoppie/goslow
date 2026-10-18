@@ -30,6 +30,11 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 	// Request ID runs first so the recovery handler can report it.
 	router.Use(requestIDMiddleware, recoveryMiddleware)
 
+	matcher, err := publicPaths(conf)
+	if err != nil {
+		return nil, err
+	}
+
 	for index := range serviceRoutes {
 		route := serviceRoutes[index]
 		var handler http.Handler
@@ -40,9 +45,15 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 			handler = allowedContentTypeMiddleware(handler, route.AllowedContentType)
 		}
 
-		handler = loggingMiddleware(handler, route.SlaMs)
+		excluded := matcher.matches(route.Method, route.Path)
+		if excluded {
+			if route.Auth.Enabled() {
+				return nil, fmt.Errorf("route %s %s declares auth %q but is also in the unauthenticated exclusion list", route.Method, route.Path, route.Auth)
+			}
+			route.Auth = AuthNone
+		}
 
-		strategies, err := routeAuthStrategies(conf, route)
+		strategies, err := routeAuthStrategies(route)
 		if err != nil {
 			return nil, err
 		}
@@ -64,20 +75,17 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 			}
 		}
 
-		if conf.HTTP.Server.AllowCorsForLocalDevelopment {
-			handler = AllowCorsForLocalDevelopment(handler)
+		// Logging wraps auth so 401/403 responses are logged and counted.
+		handler = loggingMiddleware(handler, route.Path, route.SlaMs)
 
+		if len(conf.HTTP.Server.AllowedOrigins) > 0 {
+			handler = corsMiddleware(handler, conf.HTTP.Server.AllowedOrigins, false)
 			if route.Method != http.MethodOptions {
 				router.
 					Path(route.Path).
 					Methods(http.MethodOptions).
-					Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-						w.Header().Add("Access-Control-Allow-Origin", "*")
-						w.Header().Add("Access-Control-Allow-Methods", "*")
-						w.Header().Add("Access-Control-Allow-Headers", "*")
-					}))
+					Handler(corsMiddleware(http.NotFoundHandler(), conf.HTTP.Server.AllowedOrigins, false))
 			}
-
 		}
 
 		router.
@@ -153,6 +161,11 @@ func serveRoutes(ctx context.Context, router *mux.Router) error {
 		return err
 	}
 
+	if err := ValidateServingConfiguration(config); err != nil {
+		Log.Error("Invalid serving configuration", zap.Error(err))
+		return err
+	}
+
 	listener, err := net.Listen("tcp", config.HTTP.Server.ListeningAddress)
 	if err != nil {
 		Log.Error("Unable to listen for HTTP traffic", zap.Error(err))
@@ -161,6 +174,8 @@ func serveRoutes(ctx context.Context, router *mux.Router) error {
 	defer listener.Close()
 
 	Log.Info("Starting new HTTP server", zap.String("ListeningAddress", config.HTTP.Server.ListeningAddress))
+
+	startMetricsServerIfEnabled(ctx, config)
 
 	return serveHTTPServer(ctx, newHTTPServer(config, router), listener,
 		config.HTTP.Server.TLSEnabled, config.HTTP.Server.TLSCertFileName, config.HTTP.Server.TLSKeyFileName)
@@ -199,7 +214,8 @@ func StartHttpServerWithWeb(routes Routes, dist embed.FS) error {
 
 	stripped, err := fs.Sub(dist, "dist")
 	if err != nil {
-		fmt.Println("Error stripping frontend")
+		Log.Error("Error stripping frontend", zap.Error(err))
+		return err
 	}
 	fileServer := http.FileServer(http.FS(stripped))
 	router.PathPrefix("/").Handler(fileServer)
@@ -215,7 +231,6 @@ type Route struct {
 	RolesRequired      []string
 	AllowedContentType string
 	Auth               AuthStrategy
-	AuthRequired       bool
 }
 
 type Routes []Route

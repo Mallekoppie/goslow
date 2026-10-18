@@ -184,8 +184,8 @@ func TestOAuthRouteWithoutRolesInvokesHandler(t *testing.T) {
 		Method: http.MethodGet,
 		Auth:   AuthOAuth,
 		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
-			issuer, _ = r.Context().Value(ContextOAuthIssuer).(string)
-			username, _ = r.Context().Value(ContextOAuthPreferredUsername).(string)
+			issuer = IssuerFromContext(r.Context())
+			username = UsernameFromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
 		},
 	}})
@@ -220,7 +220,7 @@ func TestOAuthRouteEnforcesRoles(t *testing.T) {
 		Auth:          AuthOAuth,
 		RolesRequired: []string{"admin"},
 		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
-			granted, _ = r.Context().Value(ContextOAuthRoles).([]string)
+			granted = RolesFromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
 		},
 	}})
@@ -290,6 +290,65 @@ func TestLocalOrOIDCAcceptsEitherToken(t *testing.T) {
 	}
 }
 
+func TestRouteWithoutAuthStrategyFailsClosed(t *testing.T) {
+	setupTestPlatformState(t)
+
+	_, err := newRouter(Routes{{
+		Path:        "/public-but-unspecified",
+		Method:      http.MethodGet,
+		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {},
+	}})
+	if !errors.Is(err, ErrRouteAuthStrategyRequired) {
+		t.Fatalf("expected ErrRouteAuthStrategyRequired, got %v", err)
+	}
+}
+
+func TestAuthNoneRouteIsExplicitlyPublic(t *testing.T) {
+	setupTestPlatformState(t)
+
+	router, err := newRouter(Routes{{
+		Path:   "/public",
+		Method: http.MethodGet,
+		Auth:   AuthNone,
+		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		},
+	}})
+	if err != nil {
+		t.Fatalf("newRouter failed: %v", err)
+	}
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/public", nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("expected an unauthenticated call to succeed, got %d", response.Code)
+	}
+}
+
+func TestLocalOrOIDCRequiresBothStrategiesEnabled(t *testing.T) {
+	cfg := setupTestPlatformState(t)
+	cfg.Auth.Server.LocalJwt.Enabled = true
+	cfg.Auth.Server.OAuth.Enabled = false
+	SetPlatformConfiguration(*cfg)
+
+	_, err := newRouter(Routes{{
+		Path:        "/either",
+		Method:      http.MethodGet,
+		Auth:        AuthLocalOrOIDC,
+		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {},
+	}})
+	if err == nil {
+		t.Fatal("expected local-or-oidc to fail when oauth is disabled")
+	}
+}
+
+func TestRouteWithoutAuthStrategyFailsClosedAtRouterBuild(t *testing.T) {
+	// Guard against a future change that makes an empty strategy mean public.
+	if _, err := routeAuthStrategies(Route{}); !errors.Is(err, ErrRouteAuthStrategyRequired) {
+		t.Fatalf("expected ErrRouteAuthStrategyRequired, got %v", err)
+	}
+}
+
 func TestRouterRejectsUnknownOrDisabledStrategies(t *testing.T) {
 	cfg := setupTestPlatformState(t)
 	handler := func(w http.ResponseWriter, r *http.Request) {}
@@ -350,6 +409,7 @@ func TestRecoveryMiddlewareReturnsJSON500WithRequestID(t *testing.T) {
 	router, err := newRouter(Routes{{
 		Path:   "/boom",
 		Method: http.MethodGet,
+		Auth:   AuthNone,
 		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
 			panic("exploded")
 		},
@@ -387,8 +447,9 @@ func TestRequestIDMiddlewarePreservesIncomingValue(t *testing.T) {
 	router, err := newRouter(Routes{{
 		Path:   "/id",
 		Method: http.MethodGet,
+		Auth:   AuthNone,
 		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
-			seen = requestIDFromContext(r.Context())
+			seen = RequestIDFromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
 		},
 	}})

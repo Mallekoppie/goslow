@@ -293,10 +293,10 @@ func main() {
 }
 ```
 
-Preflight requests are answered with CORS headers from `Grpc.Server.AllowedOrigins`
-(or `*` when `HTTP.Server.AllowCorsForLocalDevelopment` is set). When TLS is
-disabled the handler is wrapped in h2c so native gRPC clients can use plaintext
-HTTP/2.
+Preflight requests are answered with exact-origin CORS headers from
+`Grpc.Server.AllowedOrigins`; wildcard origins are rejected by configuration
+validation. When TLS is disabled the handler is wrapped in h2c so native gRPC
+clients can use plaintext HTTP/2.
 
 ### Custom Listener
 
@@ -336,10 +336,17 @@ func main() {
     conf.HTTP.Server.ListeningAddress = "127.0.0.1:9000"
     conf.Database.BoltDB.Enabled = true
     conf.Database.BoltDB.FileName = "./bolt.db"
-    platform.SetPlatformConfiguration(conf)
+    if err := platform.SetPlatformConfiguration(conf); err != nil {
+        log.Fatal(err)
+    }
     platform.StartHttpServer(routes)
 }
 ```
+
+`SetPlatformConfiguration` applies defaults, validates, publishes atomically, and
+initializes logging, Vault, and OAuth client renewal. It returns an error for
+invalid configuration (for example an unknown log level or wildcard CORS origin)
+and never publishes partially valid state.
 
 ### Configuration Defaults
 
@@ -357,6 +364,12 @@ these defaults:
 | `database.boltdb.enabled` | `false` |
 | `database.boltdb.opentimeoutseconds` | `5` |
 | `auth.server.oauth.rolesclaim` | `roles` |
+| `http.server.allowedorigins` | empty (CORS disabled) |
+| `http.server.maxrequestbodybytes` | `1048576` |
+| `grpc.server.auth` | unset (startup error if JWT/OAuth is enabled) |
+| `grpc.server.streamtimeoutseconds` | `0` (unlimited) |
+| `grpc.server.healthenabled` / `reflectionenabled` | `false` |
+| `metrics.enabled` | `false` |
 
 `GetPlatformConfiguration()` loads once and caches the result; `SetPlatformConfiguration()`
 overrides it for tests or programmatic setups. `SavePlatformConfiguration()` writes the
@@ -384,8 +397,9 @@ platform.Route{
 }
 ```
 
-An explicit `Route.Auth` wins. The legacy `Route.AuthRequired: true` keeps its previous
-AND semantics: every server auth strategy that is enabled must accept the request.
+An explicit `Route.Auth` is mandatory: a route without one fails router
+construction. Use `Auth: platform.AuthNone` for a deliberately public route.
+A route that requests a disabled strategy also fails at startup.
 
 An OAuth route with no `RolesRequired` only verifies the token. If the identity provider
 cannot be reached at request time the route returns `503 Service Unavailable` with a
@@ -394,6 +408,101 @@ cannot be reached at request time the route returns `503 Service Unavailable` wi
 Roles are read from `auth.server.oauth.rolesclaim`. The literal claim key is tried first
 (handy for Zitadel URNs), then a dotted path such as `realm_access.roles`. The claim may
 be a list of strings or an object whose keys are the roles.
+
+### Unauthenticated Exclusion List
+
+One list covers HTTP routes and RPC procedures:
+
+```yaml
+platform:
+  auth:
+    server:
+      unauthenticatedpaths:
+        - POST /auth/login          # method-qualified HTTP route
+        - /gen.HelloService/Login   # RPC procedure (unary and streaming)
+        - /healthz
+```
+
+Rules:
+
+- Entries are exact paths or `METHOD /path`; wildcards are not supported.
+- Excluded routes may omit `Route.Auth`; declaring a real strategy on an excluded
+  route is a startup error.
+- Connect procedures listed here bypass the auth interceptor.
+- `grpc.server.unauthenticatedpaths` is deprecated; configuring both lists fails
+  startup. `/metrics` is never on the application origin, so it needs no entry.
+
+### Local Login Flow
+
+Local JWT login is the bootstrap call that must be public:
+
+1. The client calls the login route or procedure, which is in the exclusion list.
+2. The handler validates credentials and calls
+   `platform.LocalJwt.NewLocalJwtToken(claims)`. `iat` is set automatically and
+   `exp` follows `auth.server.localjwt.jwtexpiration` (minutes).
+3. The client sends `Authorization: Bearer <token>` on later calls.
+4. Expired or wrongly signed tokens return `401`/`CodeUnauthenticated`; there is no
+   refresh token, so the client logs in again.
+
+Forgetting the login entry makes the login endpoint itself require a token, which
+is the intended fail-closed behavior.
+
+```yaml
+platform:
+  auth:
+    server:
+      unauthenticatedpaths: ["POST /auth/login", "/gen.HelloService/Login"]
+      localjwt:
+        enabled: true
+        jwtsigningkey: "replace-me"
+        jwtsigningmethod: HS256
+        jwtexpiration: 60
+  grpc:
+    server:
+      auth: local-jwt
+      procedureroles:
+        /gen.HelloService/SayHello: [admin]
+```
+
+### Metrics
+
+Metrics are always isolated on a dedicated listener and are never mounted on the
+application origin. Prometheus scrapes the metrics port directly; no application
+credentials are involved.
+
+```yaml
+platform:
+  metrics:
+    enabled: true
+    listenaddress: 127.0.0.1:9100
+    path: /metrics
+```
+
+```yaml
+scrape_configs:
+  - job_name: goslow
+    static_configs:
+      - targets: ["127.0.0.1:9100"]
+```
+
+Exported families: `goslow_http_requests_total`, `goslow_http_request_duration_seconds`,
+`goslow_rpc_requests_total`, `goslow_rpc_request_duration_seconds`,
+`goslow_auth_decisions_total` (`allowed`/`denied`/`anonymous`), and
+`goslow_inflight_requests`. Labels use registered routes and procedure names only;
+tokens, headers, and bodies are never recorded. The listener starts and stops with
+the server context.
+
+### Health and Reflection
+
+`grpc.server.healthenabled` registers `grpc.health.v1.Health` for the service names
+in `ConnectServerOptions.ServiceNames`; `grpc.server.reflectionenabled` registers
+the v1 and v1alpha reflection handlers. Both are disabled by default and are meant
+for development and tests. With reflection enabled:
+
+```bash
+grpcurl -insecure -use-reflection localhost:9001 list
+grpcurl -insecure -use-reflection localhost:9001 grpc.health.v1.Health/Check
+```
 
 ### Database API
 

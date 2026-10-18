@@ -1,29 +1,31 @@
 package platform
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat/go-jwx/jwk"
 	"go.uber.org/zap"
 )
 
 var (
-	oAuthClientTokenEnabled        = false
 	oAuthClientTokenConfiguration  []clientTokenConfig
 	ErrOAuthClientConfigNotFound   = errors.New("oauth client config not found")
 	ErrOAuthIncorrectIDPStatusCode = errors.New("incorrect status code on token request to idp")
+	ErrOAuthInvalidEndpoint        = errors.New("invalid oauth token endpoint")
 	oAuthHttpClient                *http.Client
-	oAuthDefaultTLSConfig          = &tls.Config{InsecureSkipVerify: true}
+	oAuthClientOnce                sync.Once
+	oAuthDefaultTLSConfig          = &tls.Config{}
 	oAuthTokens                    map[string]string
 	oAuthStateLock                 sync.RWMutex
 	oAuthRenewStop                 chan struct{}
@@ -47,36 +49,58 @@ type idpDetailsCacheItem struct {
 	SetPopulated bool
 }
 
-func init() {
-	initializeVault()
-	oAuthHttpClient = createOAuthHTTPClient()
-	initializeOAuthTokenClients()
-
-	issuerJwkUrlMap = make(map[string]idpDetailsCacheItem, 0)
+func ensureOAuthHTTPClient() *http.Client {
+	oAuthClientOnce.Do(func() {
+		oAuthHttpClient = createOAuthHTTPClient()
+	})
+	return oAuthHttpClient
 }
 
-func initializeOAuthTokenClients() {
-	// Restart cleanly if this is called more than once (for example from tests).
-	stopOAuthTokenRenewal()
+// createInsecureOAuthHTTPClient returns a client with certificate verification
+// disabled. It is only used for clients that explicitly opt in.
+func createInsecureOAuthHTTPClient() *http.Client {
+	client := createOAuthHTTPClient()
+	client.Transport = &http.Transport{
+		MaxIdleConnsPerHost: oAuthMaxIdleConnections,
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+	}
+	return client
+}
 
-	if internalConfig == nil || len(internalConfig.Auth.Client.OAuth) == 0 {
-		return
+// initializeOAuthTokenClients applies config-driven OAuth client setup. It stops
+// existing renewal workers, resets caches, and skips clients that cannot be
+// configured instead of enabling them with empty credentials.
+func initializeOAuthTokenClients(conf *Config) error {
+	stopOAuthTokenRenewal()
+	ensureOAuthHTTPClient()
+	ensureIssuerJwkCache()
+
+	oAuthStateLock.Lock()
+	oAuthTokens = nil
+	oAuthClientTokenConfiguration = nil
+	oAuthRenewStop = nil
+	oAuthStateLock.Unlock()
+
+	if conf == nil || len(conf.Auth.Client.OAuth) == 0 {
+		return nil
 	}
 
 	oAuthStateLock.Lock()
-	oAuthTokens = make(map[string]string, len(internalConfig.Auth.Client.OAuth))
-	oAuthClientTokenConfiguration = make([]clientTokenConfig, 0, len(internalConfig.Auth.Client.OAuth))
-	oAuthClientTokenEnabled = true
+	oAuthTokens = make(map[string]string, len(conf.Auth.Client.OAuth))
+	oAuthClientTokenConfiguration = make([]clientTokenConfig, 0, len(conf.Auth.Client.OAuth))
 	oAuthRenewStop = make(chan struct{})
+	stop := oAuthRenewStop
 	oAuthStateLock.Unlock()
 
-	for _, v := range internalConfig.Auth.Client.OAuth {
-		if internalConfig.Vault.Enabled && len(v.VaultPath) > 0 {
+	for _, v := range conf.Auth.Client.OAuth {
+		if conf.Vault.Enabled && len(v.VaultPath) > 0 {
 			secrets, err := Vault.GetSecrets(v.VaultPath)
 			if err != nil {
-				Log.Error("Unable to retrieve OAuth client configs from Vault", zap.String("vault_path", v.VaultPath),
+				Log.Error("Unable to retrieve OAuth client configs from Vault; skipping client",
+					zap.String("vault_path", v.VaultPath),
 					zap.String("config_id", v.ID),
 					zap.Error(err))
+				continue
 			}
 
 			v.vaultClientIdValue = secrets[v.VaultClientIdKey]
@@ -85,11 +109,15 @@ func initializeOAuthTokenClients() {
 			v.vaultPasswordValue = secrets[v.VaultPasswordKey]
 			v.vaultIdpTokenEndpointValue = secrets[v.VaultIdpTokenEndpointKey]
 			v.vaultEnabled = true
+
+			if len(v.vaultClientIdValue) == 0 || len(v.vaultIdpTokenEndpointValue) == 0 {
+				Log.Error("OAuth client config from Vault is incomplete; skipping client", zap.String("config_id", v.ID))
+				continue
+			}
 		}
 
 		oAuthStateLock.Lock()
 		oAuthClientTokenConfiguration = append(oAuthClientTokenConfiguration, v)
-		stop := oAuthRenewStop
 		oAuthStateLock.Unlock()
 
 		// Do not start a renewal loop that can only fail: without an endpoint
@@ -101,16 +129,14 @@ func initializeOAuthTokenClients() {
 			continue
 		}
 
-		if stop == nil {
-			continue
-		}
-
 		oAuthRenewWG.Add(1)
 		go func(cfg clientTokenConfig, stop <-chan struct{}) {
 			defer oAuthRenewWG.Done()
 			autoRenewOAuth2Token(cfg, stop)
 		}(v, stop)
 	}
+
+	return nil
 }
 
 // stopOAuthTokenRenewal stops all token renewal goroutines and waits for them to exit.
@@ -254,10 +280,10 @@ func internalGetOAuth2Token(id string) (accessToken string, err error) {
 		return "", ErrOAuthClientConfigNotFound
 	}
 
-	var url string
+	var endpoint string
 	var payload *strings.Reader
 	if clientConfig.vaultEnabled {
-		url = clientConfig.vaultIdpTokenEndpointValue
+		endpoint = clientConfig.vaultIdpTokenEndpointValue
 
 		payload = strings.NewReader(fmt.Sprintf("client_id=%s&client_secret=%s&username=%s&password=%s&grant_type=password",
 			clientConfig.vaultClientIdValue,
@@ -265,7 +291,7 @@ func internalGetOAuth2Token(id string) (accessToken string, err error) {
 			clientConfig.vaultUsernameValue,
 			clientConfig.vaultPasswordValue))
 	} else {
-		url = clientConfig.IdpTokenEndpoint
+		endpoint = clientConfig.IdpTokenEndpoint
 
 		payload = strings.NewReader(fmt.Sprintf("client_id=%s&client_secret=%s&username=%s&password=%s&grant_type=password",
 			clientConfig.ClientID,
@@ -274,18 +300,36 @@ func internalGetOAuth2Token(id string) (accessToken string, err error) {
 			clientConfig.Password))
 	}
 
-	request, _ := http.NewRequest("POST", url, payload)
+	parsedEndpoint, parseErr := url.Parse(endpoint)
+	if parseErr != nil || parsedEndpoint.Host == "" ||
+		(parsedEndpoint.Scheme != "http" && parsedEndpoint.Scheme != "https") {
+		Log.Error("OAuth token endpoint is invalid", zap.String("config_id", id))
+		return "", fmt.Errorf("%w: %q", ErrOAuthInvalidEndpoint, endpoint)
+	}
 
-	request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(oAuthRequestTimeout)*time.Second)
+	defer cancel()
 
-	response, err := oAuthHttpClient.Do(request)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, payload)
+	if err != nil {
+		Log.Error("Unable to build OAuth2 token request", zap.String("config_id", id), zap.Error(err))
+		return "", err
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := ensureOAuthHTTPClient()
+	if clientConfig.InsecureSkipVerify {
+		client = createInsecureOAuthHTTPClient()
+	}
+
+	response, err := client.Do(request)
 	if err != nil {
 		Log.Error("Error getting OAuth2 token from IDP", zap.String("config_id", id),
 			zap.Error(err))
 		return "", err
 	}
 	defer response.Body.Close()
-	body, err := ioutil.ReadAll(response.Body)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		Log.Error("Error reading response body from IDP", zap.String("config_id", id),
 			zap.Error(err))
@@ -391,7 +435,7 @@ func getJksUrl(issuerUrl string) (url string, err error) {
 	wellKnownExtension := "/.well-known/openid-configuration"
 	fullPath := fmt.Sprintf("%s%s", issuerUrl, wellKnownExtension)
 
-	response, err := oAuthHttpClient.Get(fullPath)
+	response, err := ensureOAuthHTTPClient().Get(fullPath)
 	if err != nil {
 		Log.Error("Unable to call IDP Well Known configuration endpoint", zap.String("idp_issuer", issuerUrl),
 			zap.Error(err))

@@ -23,19 +23,17 @@ const (
 	connectTestAllowList = "https://app.example"
 )
 
-type echoService struct {
-	authPrefix string
-}
+type echoService struct{}
 
 func (e *echoService) Register(mux *http.ServeMux, options ...connect.HandlerOption) {
 	mux.Handle(echoProcedure, connect.NewUnaryHandler(
 		echoProcedure,
 		func(ctx context.Context, request *connect.Request[wrapperspb.StringValue]) (*connect.Response[wrapperspb.StringValue], error) {
 			value := request.Msg.GetValue()
-			if username, ok := ctx.Value(ContextOAuthPreferredUsername).(string); ok && username != "" {
+			if username := UsernameFromContext(ctx); username != "" {
 				value += "|" + username
 			}
-			if claims, ok := ctx.Value(ContextLocalJwtClaims).(map[string]interface{}); ok {
+			if claims := ClaimsFromContext(ctx); claims != nil {
 				if subject, ok := claims["sub"].(string); ok {
 					value += "|" + subject
 				}

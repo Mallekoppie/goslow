@@ -3,7 +3,6 @@ package platform
 import (
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/spf13/viper"
@@ -13,10 +12,15 @@ import (
 var (
 	internalConfig           *Config
 	mutex                    sync.Mutex
-	ErrInvalidConfigFilePath = errors.New("Invalid config file path for settings platform.log.logfilepath")
+	bootstrapLock            sync.Mutex
+	ErrInvalidConfigFilePath = errors.New("invalid config file path for settings platform.log.logfilepath")
 )
 
 func writePlatformConfiguration(conf Config) error {
+	applyDefaults(&conf)
+	if err := validateConfiguration(&conf); err != nil {
+		return err
+	}
 	viper.Set("platform", conf)
 	return viper.WriteConfig()
 }
@@ -27,21 +31,58 @@ func SavePlatformConfiguration(conf Config) error {
 	return writePlatformConfiguration(conf)
 }
 
-func SetPlatformConfiguration(conf Config) {
+// SetPlatformConfiguration validates programmatic configuration, publishes it,
+// and initializes logger, Vault, and OAuth client renewal. Invalid configuration
+// is never published.
+func SetPlatformConfiguration(conf Config) error {
+	cfg := conf
+	applyDefaults(&cfg)
+	if err := validateConfiguration(&cfg); err != nil {
+		return err
+	}
+
+	publishConfiguration(&cfg)
+	return applyRuntimeConfiguration(&cfg)
+}
+
+func publishConfiguration(cfg *Config) {
 	mutex.Lock()
-	internalConfig = &conf
+	internalConfig = cfg
 	mutex.Unlock()
-	ConfigureLogger()
 }
 
 func GetPlatformConfiguration() (*Config, error) {
 	mutex.Lock()
-	defer mutex.Unlock()
-
-	if internalConfig != nil {
-		return internalConfig, nil
+	cached := internalConfig
+	mutex.Unlock()
+	if cached != nil {
+		return cached, nil
 	}
 
+	// Serialize the first load so runtime initialization runs once.
+	bootstrapLock.Lock()
+	defer bootstrapLock.Unlock()
+
+	mutex.Lock()
+	cached = internalConfig
+	mutex.Unlock()
+	if cached != nil {
+		return cached, nil
+	}
+
+	cfg, err := loadPlatformConfiguration()
+	if err != nil {
+		return nil, err
+	}
+
+	publishConfiguration(cfg)
+	if err := applyRuntimeConfiguration(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+func loadPlatformConfiguration() (*Config, error) {
 	cfg := &Config{}
 	viper.SetConfigType("yml")
 	viper.AddConfigPath(".")
@@ -51,24 +92,36 @@ func GetPlatformConfiguration() (*Config, error) {
 	if err := viper.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
 		if errors.As(err, &notFound) {
-			fmt.Println("Config file `config.yml` not found. Using default configurations")
+			fmt.Println("config file `config.yml` not found, using default configurations")
 			cfg = createDefaultConfiguration()
 		} else {
-			log.Println("Unable to read config file: ", err.Error())
-			return nil, err
+			return nil, fmt.Errorf("unable to read config file: %w", err)
 		}
 	} else if err := viper.UnmarshalKey("platform", cfg); err != nil {
-		log.Println("Error reading config: ", err.Error())
-		return nil, err
+		return nil, fmt.Errorf("unable to decode config: %w", err)
 	}
 
-	if err := cfg.checkPlatformConfiguration(); err != nil {
-		log.Println("Config file incorrect: ", err.Error())
-		return nil, err
+	applyDefaults(cfg)
+	if err := validateConfiguration(cfg); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
+	return cfg, nil
+}
 
-	internalConfig = cfg
-	return internalConfig, nil
+// applyRuntimeConfiguration initializes subsystems that depend on configuration.
+// It must be called without the configuration mutex held.
+func applyRuntimeConfiguration(cfg *Config) error {
+	if cfg == nil {
+		return errors.New("config is nil")
+	}
+	if err := ConfigureLoggerWithConfig(cfg); err != nil {
+		return err
+	}
+	if err := initializeVault(cfg); err != nil {
+		return err
+	}
+	initializeMetrics(cfg)
+	return initializeOAuthTokenClients(cfg)
 }
 
 func GetComponentConfiguration(key string, object interface{}) error {
@@ -102,6 +155,8 @@ type Config struct {
 			TLSKeyFileName               string
 			TLSEnabled                   bool
 			AllowCorsForLocalDevelopment bool
+			AllowedOrigins               []string
+			MaxRequestBodyBytes          int64
 			ReadHeaderTimeoutSeconds     int
 			ReadTimeoutSeconds           int
 			WriteTimeoutSeconds          int
@@ -117,18 +172,31 @@ type Config struct {
 			TLSKeyFileName           string
 			TLSEnabled               bool
 			UnAuthenticatedPaths     []string
+			Auth                     AuthStrategy
+			ProcedureRoles           map[string][]string
+			HealthEnabled            bool
+			ReflectionEnabled        bool
+			SlaMs                    int64
 			AllowedOrigins           []string
 			ReadHeaderTimeoutSeconds int
 			ReadTimeoutSeconds       int
 			WriteTimeoutSeconds      int
+			StreamTimeoutSeconds     int
 			IdleTimeoutSeconds       int
 			MaxReceiveMessageBytes   int
 		}
 	}
 
+	Metrics struct {
+		Enabled       bool
+		ListenAddress string
+		Path          string
+	}
+
 	Auth struct {
 		Server struct {
-			OAuth struct {
+			UnauthenticatedPaths []string
+			OAuth                struct {
 				Enabled           bool
 				IdpWellKnownURL   string
 				ClientID          string
@@ -205,6 +273,7 @@ type clientTokenConfig struct {
 	IdpTokenEndpoint           string
 	ClientID                   string
 	ClientSecret               string
+	InsecureSkipVerify         bool
 	Username                   string
 	Password                   string
 	VaultPath                  string
@@ -221,12 +290,26 @@ type clientTokenConfig struct {
 	vaultEnabled               bool
 }
 
-func (conf *Config) checkPlatformConfiguration() error {
+// applyDefaults fills zero values with safe defaults. It is shared by file
+// loading and programmatic configuration so both paths behave identically.
+func applyDefaults(conf *Config) {
 	if conf == nil {
-		return errors.New("config is nil")
+		return
 	}
 	if conf.Log.Level == "" {
 		conf.Log.Level = "info"
+	}
+	if conf.Log.FilePath == "" {
+		conf.Log.FilePath = "./default.log"
+	}
+	if conf.Log.MaxAge == 0 {
+		conf.Log.MaxAge = 10
+	}
+	if conf.Log.MaxSize == 0 {
+		conf.Log.MaxSize = 51200
+	}
+	if conf.Log.MaxBackups == 0 {
+		conf.Log.MaxBackups = 10
 	}
 	if conf.Database.BoltDB.OpenTimeoutSeconds <= 0 {
 		conf.Database.BoltDB.OpenTimeoutSeconds = 5
@@ -243,6 +326,9 @@ func (conf *Config) checkPlatformConfiguration() error {
 	if conf.HTTP.Server.IdleTimeoutSeconds <= 0 {
 		conf.HTTP.Server.IdleTimeoutSeconds = 120
 	}
+	if conf.HTTP.Server.MaxRequestBodyBytes <= 0 {
+		conf.HTTP.Server.MaxRequestBodyBytes = DefaultReadJsonRequestLimit
+	}
 	if conf.Auth.Server.OAuth.RolesClaim == "" {
 		conf.Auth.Server.OAuth.RolesClaim = "roles"
 	}
@@ -258,22 +344,43 @@ func (conf *Config) checkPlatformConfiguration() error {
 	if conf.Grpc.Server.IdleTimeoutSeconds <= 0 {
 		conf.Grpc.Server.IdleTimeoutSeconds = 120
 	}
-	if conf.Log.FilePath == "" {
-		log.Println("Configuration Log.FiePath is empty. Defaulting to ./default.log")
-		conf.Log.FilePath = "./default.log"
+	if conf.Metrics.Path == "" {
+		conf.Metrics.Path = "/metrics"
 	}
-	if conf.Log.MaxAge == 0 {
-		log.Println("Configuration Log.MaxAge is empty. Defaulting to 10")
-		conf.Log.MaxAge = 10
+}
+
+// validateConfiguration rejects configuration that cannot be used safely.
+// File existence checks belong to serving validation, not config parsing.
+func validateConfiguration(conf *Config) error {
+	if conf == nil {
+		return errors.New("config is nil")
 	}
-	if conf.Log.MaxSize == 0 {
-		log.Println("Configuration Log.MaxSize is empty. Defaulting to 51200")
-		conf.Log.MaxSize = 51200
+	if _, err := logLevelStringToZapType(conf.Log.Level); err != nil {
+		return err
 	}
-	if conf.Log.MaxBackups == 0 {
-		conf.Log.MaxBackups = 10
+	if conf.Metrics.Enabled && conf.Metrics.ListenAddress == "" {
+		return errors.New("metrics.enabled requires metrics.listenaddress")
+	}
+	if err := validateOrigins("http.server.allowedorigins", conf.HTTP.Server.AllowedOrigins); err != nil {
+		return err
+	}
+	if err := validateOrigins("grpc.server.allowedorigins", conf.Grpc.Server.AllowedOrigins); err != nil {
+		return err
+	}
+	if len(conf.Auth.Server.UnauthenticatedPaths) > 0 && len(conf.Grpc.Server.UnAuthenticatedPaths) > 0 {
+		return ErrConflictingUnauthenticatedPaths
 	}
 	return nil
+}
+
+// checkPlatformConfiguration applies defaults and validates. Retained as the
+// internal compatibility entry point for tests.
+func (conf *Config) checkPlatformConfiguration() error {
+	if conf == nil {
+		return errors.New("config is nil")
+	}
+	applyDefaults(conf)
+	return validateConfiguration(conf)
 }
 
 func createDefaultConfiguration() *Config {
@@ -286,6 +393,6 @@ func createDefaultConfiguration() *Config {
 	cfg.Log.FileLoggingEnabled = false
 	cfg.Database.BoltDB.Enabled = false
 	cfg.Component.ComponentName = "Not Specified"
-	cfg.checkPlatformConfiguration()
+	applyDefaults(cfg)
 	return cfg
 }

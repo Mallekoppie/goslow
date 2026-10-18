@@ -18,6 +18,7 @@ func configureConnectLocalJWT(t *testing.T) *Config {
 	cfg.Auth.Server.LocalJwt.Enabled = true
 	cfg.Auth.Server.LocalJwt.JwtSigningKey = "connect-test-key"
 	cfg.Auth.Server.LocalJwt.JwtSigningMethod = "HS256"
+	cfg.Grpc.Server.Auth = AuthLocalJWT
 	SetPlatformConfiguration(*cfg)
 	return cfg
 }
@@ -85,7 +86,7 @@ func TestConnectAuthAcceptsLocalJWTAndPropagatesClaims(t *testing.T) {
 
 func TestConnectAuthUnauthenticatedPathBypassesTokenCheck(t *testing.T) {
 	cfg := configureConnectLocalJWT(t)
-	cfg.Grpc.Server.UnAuthenticatedPaths = []string{echoProcedure}
+	cfg.Auth.Server.UnauthenticatedPaths = []string{echoProcedure}
 	SetPlatformConfiguration(*cfg)
 
 	server := httptest.NewServer(newEchoHandler(t, ConnectServerOptions{}))
@@ -106,6 +107,7 @@ func TestConnectAuthUsesOAuthWhenLocalJWTDisabled(t *testing.T) {
 	cfg.Auth.Server.OAuth.IdpWellKnownURL = idp.server.URL
 	cfg.Auth.Server.OAuth.ClientID = "test-client"
 	cfg.Auth.Server.OAuth.AllowedAlgorithms = []string{"RS256"}
+	cfg.Grpc.Server.Auth = AuthOAuth
 	SetPlatformConfiguration(*cfg)
 
 	server := httptest.NewServer(newEchoHandler(t, ConnectServerOptions{}))
@@ -128,6 +130,7 @@ func TestConnectAuthReportsIdentityProviderOutage(t *testing.T) {
 	cfg.Auth.Server.OAuth.Enabled = true
 	cfg.Auth.Server.OAuth.IdpWellKnownURL = "http://127.0.0.1:1/.well-known/openid-configuration"
 	cfg.Auth.Server.OAuth.ClientID = "test-client"
+	cfg.Grpc.Server.Auth = AuthOAuth
 	SetPlatformConfiguration(*cfg)
 
 	server := httptest.NewServer(newEchoHandler(t, ConnectServerOptions{}))

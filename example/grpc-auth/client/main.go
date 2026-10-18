@@ -50,7 +50,7 @@ func main() {
 		platform.Log.Error("Login failed", zap.String("message", loginResponse.Msg.Message))
 		return
 	}
-	platform.Log.Info("Login successful", zap.String("token", loginResponse.Msg.Token))
+	platform.Log.Info("Login successful", zap.String("token", platform.RedactToken(loginResponse.Msg.Token)))
 
 	helloRequest := connect.NewRequest(&gen.HelloRequest{Name: "World"})
 	helloRequest.Header().Set("Authorization", "Bearer "+loginResponse.Msg.Token)

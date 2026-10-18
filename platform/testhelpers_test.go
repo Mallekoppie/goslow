@@ -36,7 +36,6 @@ func resetPlatformState(t *testing.T) {
 	oAuthStateLock.Lock()
 	oAuthTokens = nil
 	oAuthClientTokenConfiguration = nil
-	oAuthClientTokenEnabled = false
 	oAuthStateLock.Unlock()
 
 	issuerJwkUrlMap = nil

@@ -35,6 +35,7 @@ func TestStartHttpServerWithContextServesUntilCancelled(t *testing.T) {
 		serverErrors <- StartHttpServerWithContext(ctx, Routes{{
 			Path:   "/ping",
 			Method: http.MethodGet,
+			Auth:   AuthNone,
 			HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
 				_, _ = w.Write([]byte("pong"))
 			},

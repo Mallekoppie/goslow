@@ -5,10 +5,11 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"connectrpc.com/connect"
+	"connectrpc.com/grpchealth"
+	"connectrpc.com/grpcreflect"
 	"go.uber.org/zap"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -44,6 +45,12 @@ type ConnectServerOptions struct {
 	DisableAuthFromConfig bool
 	// WebHandler serves non-RPC requests, for example embedded Flutter assets.
 	WebHandler http.Handler
+	// SPA enables an index.html fallback for client-side routing. When set it
+	// replaces WebHandler and serves assets from SPAOptions.Assets.
+	SPA *SPAOptions
+	// ServiceNames are the fully qualified services exposed for health checks
+	// and reflection. They are required when those features are enabled.
+	ServiceNames []string
 	// AllowedOrigins is the CORS allow-list for browser gRPC-Web traffic. An
 	// empty list falls back to grpc.server.allowedorigins and then to
 	// http.server.AllowCorsForLocalDevelopment ("*").
@@ -60,7 +67,11 @@ type ConnectServerOptions struct {
 // removing this dependency, document the replacement upstream fix and the
 // migration path.
 func buildConnectHandlerOptions(conf *Config, options ConnectServerOptions) ([]connect.HandlerOption, error) {
-	interceptors := make([]connect.Interceptor, 0, len(options.Interceptors)+1)
+	interceptors := make([]connect.Interceptor, 0, len(options.Interceptors)+4)
+	// Outermost first: recovery, request id, access logging, then auth, then
+	// consumer interceptors. Auth failures are therefore logged, and panics are
+	// recovered regardless of which layer panics.
+	interceptors = append(interceptors, newConnectDefaultInterceptors(conf)...)
 
 	if !options.DisableAuthFromConfig {
 		authInterceptor, err := newConnectAuthInterceptor(conf)
@@ -97,6 +108,7 @@ func NewConnectHandler(options ConnectServerOptions) (http.Handler, error) {
 	if conf == nil {
 		conf = createDefaultConfiguration()
 	}
+	initializeMetrics(conf)
 
 	handlerOptions, err := buildConnectHandlerOptions(conf, options)
 	if err != nil {
@@ -111,19 +123,34 @@ func NewConnectHandler(options ConnectServerOptions) (http.Handler, error) {
 		service.Register(mux, handlerOptions...)
 	}
 
-	var handler http.Handler = mux
-	if options.WebHandler != nil {
-		handler = withWebFallback(mux, options.WebHandler)
+	if conf.Grpc.Server.HealthEnabled {
+		checker := grpchealth.NewStaticChecker(options.ServiceNames...)
+		prefix, healthHandler := grpchealth.NewHandler(checker, handlerOptions...)
+		mux.Handle(prefix, healthHandler)
 	}
+
+	if conf.Grpc.Server.ReflectionEnabled {
+		reflector := grpcreflect.NewStaticReflector(options.ServiceNames...)
+		prefixV1, handlerV1 := grpcreflect.NewHandlerV1(reflector, handlerOptions...)
+		mux.Handle(prefixV1, handlerV1)
+		prefixV1Alpha, handlerV1Alpha := grpcreflect.NewHandlerV1Alpha(reflector, handlerOptions...)
+		mux.Handle(prefixV1Alpha, handlerV1Alpha)
+	}
+
+	var webHandler http.Handler
+	if options.SPA != nil {
+		webHandler = NewSPAHandler(options.SPA.Assets, options.SPA.Index)
+	} else if options.WebHandler != nil {
+		webHandler = options.WebHandler
+	}
+
+	handler := withRPCAwareFallback(mux, webHandler)
 
 	allowedOrigins := options.AllowedOrigins
 	if len(allowedOrigins) == 0 {
 		allowedOrigins = conf.Grpc.Server.AllowedOrigins
 	}
-	if len(allowedOrigins) == 0 && conf.HTTP.Server.AllowCorsForLocalDevelopment {
-		allowedOrigins = []string{"*"}
-	}
-	handler = corsMiddleware(handler, allowedOrigins)
+	handler = corsMiddleware(handler, allowedOrigins, true)
 
 	if !options.TLSEnabled {
 		handler = h2c.NewHandler(handler, &http2.Server{})
@@ -132,89 +159,15 @@ func NewConnectHandler(options ConnectServerOptions) (http.Handler, error) {
 	return handler, nil
 }
 
-// withWebFallback serves RPC routes from the mux and everything else from web.
-func withWebFallback(rpc *http.ServeMux, web http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, pattern := rpc.Handler(r); pattern != "" {
-			rpc.ServeHTTP(w, r)
-			return
-		}
-		web.ServeHTTP(w, r)
-	})
-}
-
-var (
-	connectAllowedHeaders = []string{
-		"Content-Type",
-		"Authorization",
-		"X-Grpc-Web",
-		"X-User-Agent",
-		"Grpc-Timeout",
-		"Grpc-Encoding",
-		"Grpc-Accept-Encoding",
-		"Connect-Protocol-Version",
-		"Connect-Timeout-Ms",
-		"Connect-Accept-Encoding",
-		"Connect-Content-Encoding",
-	}
-	connectExposedHeaders = []string{
-		"Grpc-Status",
-		"Grpc-Message",
-		"Grpc-Status-Details-Bin",
-		"Grpc-Encoding",
-		"Connect-Protocol-Version",
-		"Connect-Content-Encoding",
-	}
-)
-
-func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
-	if len(allowedOrigins) == 0 {
-		return next
-	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		allowValue, allowed := allowedOriginValue(origin, allowedOrigins)
-		if allowed {
-			w.Header().Set("Access-Control-Allow-Origin", allowValue)
-			w.Header().Add("Vary", "Origin")
-		}
-
-		if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
-			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", strings.Join(connectAllowedHeaders, ", "))
-			w.Header().Set("Access-Control-Expose-Headers", strings.Join(connectExposedHeaders, ", "))
-			w.Header().Set("Access-Control-Max-Age", "600")
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func allowedOriginValue(origin string, allowedOrigins []string) (string, bool) {
-	if origin == "" {
-		return "", false
-	}
-	for _, allowed := range allowedOrigins {
-		if allowed == "*" {
-			return "*", true
-		}
-		if strings.EqualFold(strings.TrimSpace(allowed), origin) {
-			return origin, true
-		}
-	}
-	return "", false
-}
-
 func newConnectHTTPServer(conf *Config, handler http.Handler) *http.Server {
 	return &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: time.Duration(conf.Grpc.Server.ReadHeaderTimeoutSeconds) * time.Second,
 		ReadTimeout:       time.Duration(conf.Grpc.Server.ReadTimeoutSeconds) * time.Second,
-		WriteTimeout:      time.Duration(conf.Grpc.Server.WriteTimeoutSeconds) * time.Second,
-		IdleTimeout:       time.Duration(conf.Grpc.Server.IdleTimeoutSeconds) * time.Second,
+		// WriteTimeout stays 0: unary RPCs are bounded by an interceptor
+		// deadline, while server streams use StreamTimeoutSeconds (0 = no limit).
+		WriteTimeout: 0,
+		IdleTimeout:  time.Duration(conf.Grpc.Server.IdleTimeoutSeconds) * time.Second,
 	}
 }
 
@@ -231,6 +184,10 @@ func ServeConnect(ctx context.Context, listener net.Listener, options ConnectSer
 	}
 	if conf == nil {
 		conf = createDefaultConfiguration()
+	}
+
+	if err := ValidateServingConfiguration(conf); err != nil {
+		return err
 	}
 
 	handler, err := NewConnectHandler(options)
@@ -273,6 +230,8 @@ func StartConnectServerWithContext(ctx context.Context, options ConnectServerOpt
 	defer listener.Close()
 
 	Log.Info("Starting Connect server", zap.String("ListeningAddress", address), zap.Bool("tls", options.TLSEnabled))
+
+	startMetricsServerIfEnabled(ctx, conf)
 
 	return ServeConnect(ctx, listener, options)
 }

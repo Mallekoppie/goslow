@@ -17,10 +17,6 @@ var (
 	ErrRequestBodyTooLarge = errors.New("request body too large")
 )
 
-func init() {
-	JsonMarshaller = jsonMarshallerOrganizer{}
-}
-
 type jsonMarshallerOrganizer struct{}
 
 func (j *jsonMarshallerOrganizer) ReadJsonRequestLimit(requestBody io.ReadCloser, outputType interface{}, limit int64) error {
@@ -53,7 +49,11 @@ func (j *jsonMarshallerOrganizer) ReadJsonRequestLimit(requestBody io.ReadCloser
 }
 
 func (j *jsonMarshallerOrganizer) ReadJsonRequest(requestBody io.ReadCloser, outputType interface{}) error {
-	return j.ReadJsonRequestLimit(requestBody, outputType, DefaultReadJsonRequestLimit)
+	limit := DefaultReadJsonRequestLimit
+	if conf, err := GetPlatformConfiguration(); err == nil && conf != nil && conf.HTTP.Server.MaxRequestBodyBytes > 0 {
+		limit = conf.HTTP.Server.MaxRequestBodyBytes
+	}
+	return j.ReadJsonRequestLimit(requestBody, outputType, limit)
 }
 
 func (j *jsonMarshallerOrganizer) WriteJsonResponse(w http.ResponseWriter, statuscode int, response interface{}) {

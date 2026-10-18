@@ -119,7 +119,7 @@ func (d *boltDbDatabase) Close() error {
 
 func (d *boltDbDatabase) SaveObject(bucket string, id string, object interface{}) error {
 	if Log != nil {
-		Log.Debug("Saving object to DB", zap.String("bucket", bucket), zap.String("id", id), zap.Any("object", object))
+		Log.Debug("Saving object to DB", zap.String("bucket", bucket), zap.String("id", id))
 	}
 	if err := ensureBoltDB(); err != nil {
 		return err

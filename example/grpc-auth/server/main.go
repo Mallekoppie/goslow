@@ -62,7 +62,8 @@ func main() {
 	config.Grpc.Server.TLSCertFileName = "server.crt"
 	config.Grpc.Server.TLSKeyFileName = "server.key"
 	config.Grpc.Server.TLSEnabled = true
-	config.Grpc.Server.UnAuthenticatedPaths = []string{"/gen.HelloService/Login"}
+	config.Grpc.Server.Auth = platform.AuthLocalJWT
+	config.Auth.Server.UnauthenticatedPaths = []string{"/gen.HelloService/Login"}
 	config.Auth.Server.LocalJwt.Enabled = true
 	config.Auth.Server.LocalJwt.JwtSigningKey = "blablablacksheep"
 	config.Auth.Server.LocalJwt.JwtSigningMethod = "HS256"

@@ -239,7 +239,7 @@ const file_hello_hello_proto_rawDesc = "" +
 	"\aSuccess\x18\x03 \x01(\bR\aSuccess2q\n" +
 	"\fHelloService\x12.\n" +
 	"\x05Login\x12\x11.gen.LoginRequest\x1a\x12.gen.LoginResponse\x121\n" +
-	"\bSayHello\x12\x11.gen.HelloRequest\x1a\x12.gen.HelloResponseB\x06Z\x04/genb\x06proto3"
+	"\bSayHello\x12\x11.gen.HelloRequest\x1a\x12.gen.HelloResponseB\x11Z\x0fgrpc-server/genb\x06proto3"
 
 var (
 	file_hello_hello_proto_rawDescOnce sync.Once

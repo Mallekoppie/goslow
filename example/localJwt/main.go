@@ -17,20 +17,21 @@ var Routes = platform.Routes{
 		Method:      http.MethodPost,
 		HandlerFunc: HandleLogin,
 		SlaMs:       0,
+		Auth:        platform.AuthNone,
 	},
 	platform.Route{
-		Path:         "/renew",
-		Method:       http.MethodGet,
-		HandlerFunc:  HandleRenew,
-		SlaMs:        0,
-		AuthRequired: true,
+		Path:        "/renew",
+		Method:      http.MethodGet,
+		HandlerFunc: HandleRenew,
+		SlaMs:       0,
+		Auth:        platform.AuthLocalJWT,
 	},
 	platform.Route{
-		Path:         "/query",
-		Method:       http.MethodGet,
-		HandlerFunc:  HandleQuery,
-		SlaMs:        0,
-		AuthRequired: true,
+		Path:        "/query",
+		Method:      http.MethodGet,
+		HandlerFunc: HandleQuery,
+		SlaMs:       0,
+		Auth:        platform.AuthLocalJWT,
 	},
 }
 
@@ -70,20 +71,14 @@ func HandleQuery(w http.ResponseWriter, r *http.Request) {
 	// Handle query logic here
 	// For example, return user information based on JWT token
 
-	ctx := r.Context()
-	result := ctx.Value(platform.ContextLocalJwtClaims)
+	result := platform.ClaimsFromContext(r.Context())
 	if result == nil {
 		platform.Log.Error("No JWT claims found in context")
 		w.Write([]byte("Query successful"))
 		return
 	}
 
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		platform.Log.Error("Invalid JWT claims type in context")
-		http.Error(w, "Invalid JWT claims", http.StatusInternalServerError)
-		return
-	}
+	resultMap := result
 	username, ok := resultMap["username"].(string)
 	if !ok {
 		platform.Log.Error("Username not found in JWT claims")
@@ -99,19 +94,13 @@ func HandleRenew(w http.ResponseWriter, r *http.Request) {
 	// Handle token renewal logic here
 	// For example, generate a new JWT token with updated claims
 
-	ctx := r.Context()
-	result := ctx.Value(platform.ContextLocalJwtClaims)
+	result := platform.ClaimsFromContext(r.Context())
 	if result == nil {
 		http.Error(w, "No JWT claims found in context", http.StatusUnauthorized)
 		return
 	}
 
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		http.Error(w, "Invalid JWT claims type in context", http.StatusInternalServerError)
-		return
-	}
-
+	resultMap := result
 	username, ok := resultMap["username"].(string)
 	if !ok {
 		http.Error(w, "Username not found in JWT claims", http.StatusInternalServerError)

@@ -60,6 +60,12 @@ func redactToken(token string) string {
 	return token[:8] + "..."
 }
 
+// RedactToken returns a log-safe token prefix. Use it instead of logging raw
+// credentials.
+func RedactToken(token string) string {
+	return redactToken(token)
+}
+
 func (l localJwtOrganizer) NewLocalJwtToken(claims map[string]interface{}) (string, error) {
 	signingMethod, key, err := localJwtConfigChecks()
 	if err != nil {

@@ -3,8 +3,10 @@ package platform
 import (
 	"encoding/json"
 	"errors"
-	"io/ioutil"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"time"
 
 	vaultapi "github.com/hashicorp/vault/api"
@@ -16,39 +18,37 @@ var (
 	vaultClientList                 []*vaultapi.Client
 	vaultEnabled                    bool
 	vaultInitialized                = false
-	ErrVaultNotEnabled              = errors.New("Vault not enabled")
-	ErrVaultUnableToReadSecrets     = errors.New("Unable to read secrets from Vault")
-	ErrVaultNoAuthMethodsConfigured = errors.New("No auth methods configured for Vault")
+	ErrVaultNotEnabled              = errors.New("vault not enabled")
+	ErrVaultUnableToReadSecrets     = errors.New("unable to read secrets from vault")
+	ErrVaultNoAuthMethodsConfigured = errors.New("no auth methods configured for vault")
 )
 
 type platformVault struct {
 }
 
-func init() {
-	initializeVault()
-}
+// initializeVault applies the supplied configuration to the Vault subsystem.
+// It is idempotent: existing state is reset before applying the new config.
+func initializeVault(config *Config) error {
+	vaultClientList = nil
+	vaultEnabled = false
+	vaultInitialized = false
+	Vault = platformVault{}
 
-func initializeVault() {
-	if vaultInitialized == false {
-		Vault = platformVault{}
-		config, err := GetPlatformConfiguration()
-		if err != nil {
-			Log.Error("Error loading configuration in Vault initialization", zap.Error(err))
-		}
-
-		if config.Vault.Enabled {
-			vaultEnabled = true
-			err = setupVaultClients(config)
-			if err != nil {
-				Log.Error("Unable to create vault client during initialization", zap.Error(err))
-			}
-		} else {
-			vaultEnabled = false
-		}
-
+	if config == nil {
+		return errors.New("vault initialization requires configuration")
+	}
+	if !config.Vault.Enabled {
 		vaultInitialized = true
+		return nil
 	}
 
+	if err := setupVaultClients(config); err != nil {
+		return fmt.Errorf("unable to initialize vault clients: %w", err)
+	}
+
+	vaultEnabled = true
+	vaultInitialized = true
+	return nil
 }
 
 func createVaultClient(address string, config *Config) (client *vaultapi.Client, err error) {
@@ -85,7 +85,7 @@ func createVaultClient(address string, config *Config) (client *vaultapi.Client,
 
 	if config.Vault.Token.Enabled {
 		if len(config.Vault.Token.TokenPath) > 0 {
-			tokenValue, err := ioutil.ReadFile(config.Vault.Token.TokenPath)
+			tokenValue, err := os.ReadFile(config.Vault.Token.TokenPath)
 			if err != nil {
 				Log.Error("Unable to read contents of token file", zap.Error(err))
 			}
@@ -168,7 +168,7 @@ func (v *platformVault) GetSecrets(path string) (secrets map[string]string, err 
 				continue
 			}
 			defer response.Body.Close()
-			responseData, err := ioutil.ReadAll(response.Body)
+			responseData, err := io.ReadAll(response.Body)
 			if err != nil {
 				Log.Error("Error reading login response using cert to Vault", zap.Error(err))
 				continue

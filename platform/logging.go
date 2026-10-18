@@ -2,10 +2,10 @@ package platform
 
 import (
 	"errors"
-	"log"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -13,20 +13,24 @@ import (
 )
 
 var (
-	loggerLock         sync.Mutex
-	Log                *Logger
+	// Log is a stable handle for the process lifetime. Its underlying zap
+	// logger is swapped atomically by ConfigureLoggerWithConfig, so concurrent
+	// logging and reconfiguration are race free. Before the first configuration
+	// every method is a safe no-op.
+	Log = &Logger{}
+
 	ErrInvalidLogLevel = errors.New("incorrect log level: unable to translate to zap log level")
 )
 
 type Logger struct {
-	internalLogger *zap.Logger
+	current atomic.Pointer[zap.Logger]
 }
 
 func (l *Logger) logger() *zap.Logger {
 	if l == nil {
 		return nil
 	}
-	return l.internalLogger
+	return l.current.Load()
 }
 
 func (l *Logger) Info(msg string, fields ...zap.Field) {
@@ -53,57 +57,63 @@ func (l *Logger) Warn(msg string, fields ...zap.Field) {
 	}
 }
 
-func init() {
-	InitializeLogger()
-}
-
-func InitializeLogger() {
-	loggerLock.Lock()
-	defer loggerLock.Unlock()
-	if Log != nil {
-		return
-	}
+// InitializeLogger loads configuration (if needed) and configures the logger.
+// It is idempotent and safe to call before any logging happens.
+func InitializeLogger() error {
 	cfg, err := GetPlatformConfiguration()
 	if err != nil {
-		log.Println("Unable to get Platform configuration: ", err.Error())
-		cfg = createDefaultConfiguration()
+		return err
 	}
-	ConfigureLoggerWithConfig(cfg)
+	return ConfigureLoggerWithConfig(cfg)
 }
 
-func ConfigureLogger() {
-	loggerLock.Lock()
-	defer loggerLock.Unlock()
+// ConfigureLogger reconfigures the logger from the current platform config.
+func ConfigureLogger() error {
 	cfg, err := GetPlatformConfiguration()
-	if err != nil || cfg == nil {
-		cfg = createDefaultConfiguration()
+	if err != nil {
+		return err
 	}
-	ConfigureLoggerWithConfig(cfg)
+	return ConfigureLoggerWithConfig(cfg)
 }
 
-func ConfigureLoggerWithConfig(cfg *Config) {
+var configureLoggerLock sync.Mutex
+
+// ConfigureLoggerWithConfig swaps the underlying logger atomically. It validates
+// the configured level and returns ErrInvalidLogLevel instead of silently
+// falling back.
+func ConfigureLoggerWithConfig(cfg *Config) error {
 	if cfg == nil {
 		cfg = createDefaultConfiguration()
 	}
-	if cfg.Log.Level == "" {
-		cfg.Log.Level = "info"
-	}
-	logLevel, err := logLevelStringToZapType(cfg.Log.Level)
+
+	level, err := logLevelStringToZapType(cfg.Log.Level)
 	if err != nil {
-		logLevel = zap.NewAtomicLevelAt(zap.InfoLevel)
+		return err
 	}
+
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	jsonEncoder := zapcore.NewJSONEncoder(encoderConfig)
 	consoleWriter := zapcore.Lock(os.Stdout)
-	zapCores := []zapcore.Core{zapcore.NewCore(jsonEncoder, consoleWriter, logLevel)}
+	zapCores := []zapcore.Core{zapcore.NewCore(jsonEncoder, consoleWriter, level)}
+
 	if cfg.Log.FileLoggingEnabled {
-		fileWriter := zapcore.AddSync(&lumberjack.Logger{Filename: cfg.Log.FilePath, MaxSize: cfg.Log.MaxSize, MaxAge: cfg.Log.MaxAge, MaxBackups: cfg.Log.MaxBackups})
-		zapCores = append(zapCores, zapcore.NewCore(jsonEncoder, fileWriter, logLevel))
+		fileWriter := zapcore.AddSync(&lumberjack.Logger{
+			Filename:   cfg.Log.FilePath,
+			MaxSize:    cfg.Log.MaxSize,
+			MaxAge:     cfg.Log.MaxAge,
+			MaxBackups: cfg.Log.MaxBackups,
+		})
+		zapCores = append(zapCores, zapcore.NewCore(jsonEncoder, fileWriter, level))
 	}
+
 	newLogger := zap.New(zapcore.NewTee(zapCores...), zap.AddCaller(), zap.AddCallerSkip(1))
 	newLogger = newLogger.With(zap.Field{Key: "component", Type: zapcore.StringType, String: cfg.Component.ComponentName})
-	Log = &Logger{internalLogger: newLogger}
+
+	configureLoggerLock.Lock()
+	Log.current.Store(newLogger)
+	configureLoggerLock.Unlock()
+	return nil
 }
 
 func logLevelStringToZapType(input string) (zap.AtomicLevel, error) {

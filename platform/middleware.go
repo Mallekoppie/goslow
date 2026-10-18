@@ -17,20 +17,74 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+type contextKey string
+
 const (
-	ContextOAuthRoles             string = "OAuthRoles"
-	ContextOAuthClientToken       string = "OAuthClientToken"
-	ContextOAuthPreferredUsername string = "OAuthPreferredUsername"
-	ContextOAuthIssuer            string = "OAuthIssuer"
-	ContextLocalJwtClaims         string = "LocalJwtClaims"
-	ContextRequestID              string = "RequestID"
-	RequestIDHeader               string = "X-Request-ID"
+	contextOAuthRoles             contextKey = "oauth.roles"
+	contextOAuthClientToken       contextKey = "oauth.client.token"
+	contextOAuthPreferredUsername contextKey = "oauth.preferred.username"
+	contextOAuthIssuer            contextKey = "oauth.issuer"
+	contextLocalJwtClaims         contextKey = "localjwt.claims"
+	contextRequestID              contextKey = "request.id"
+	contextAuthOutcome            contextKey = "auth.outcome"
+
+	// RequestIDHeader is the request correlation header.
+	RequestIDHeader = "X-Request-ID"
 )
 
-// requestIDFromContext returns the request id attached by requestIDMiddleware.
-func requestIDFromContext(ctx context.Context) string {
-	if requestID, ok := ctx.Value(ContextRequestID).(string); ok {
+// RolesFromContext returns the roles granted by the auth verifier.
+func RolesFromContext(ctx context.Context) []string {
+	if roles, ok := ctx.Value(contextOAuthRoles).([]string); ok {
+		return roles
+	}
+	return nil
+}
+
+// ClientTokenFromContext returns the raw OAuth client token. Never log it.
+func ClientTokenFromContext(ctx context.Context) string {
+	if token, ok := ctx.Value(contextOAuthClientToken).(string); ok {
+		return token
+	}
+	return ""
+}
+
+// UsernameFromContext returns the authenticated username when supplied.
+func UsernameFromContext(ctx context.Context) string {
+	if username, ok := ctx.Value(contextOAuthPreferredUsername).(string); ok {
+		return username
+	}
+	return ""
+}
+
+// IssuerFromContext returns the OAuth issuer.
+func IssuerFromContext(ctx context.Context) string {
+	if issuer, ok := ctx.Value(contextOAuthIssuer).(string); ok {
+		return issuer
+	}
+	return ""
+}
+
+// ClaimsFromContext returns local JWT claims.
+func ClaimsFromContext(ctx context.Context) map[string]interface{} {
+	if claims, ok := ctx.Value(contextLocalJwtClaims).(map[string]interface{}); ok {
+		return claims
+	}
+	return nil
+}
+
+// RequestIDFromContext returns the request correlation id.
+func RequestIDFromContext(ctx context.Context) string {
+	if requestID, ok := ctx.Value(contextRequestID).(string); ok {
 		return requestID
+	}
+	return ""
+}
+
+// authOutcomeFromContext reports how authentication resolved for the request:
+// allowed, denied, or anonymous.
+func authOutcomeFromContext(ctx context.Context) string {
+	if outcome, ok := ctx.Value(contextAuthOutcome).(string); ok {
+		return outcome
 	}
 	return ""
 }
@@ -53,7 +107,8 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 		}
 
 		w.Header().Set(RequestIDHeader, requestID)
-		ctx := context.WithValue(r.Context(), ContextRequestID, requestID)
+		r.Header.Set(RequestIDHeader, requestID)
+		ctx := context.WithValue(r.Context(), contextRequestID, requestID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -64,7 +119,7 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				requestID := requestIDFromContext(r.Context())
+				requestID := RequestIDFromContext(r.Context())
 				Log.Error("Recovered from request panic",
 					zap.Any("panic", recovered),
 					zap.String("method", r.Method),
@@ -108,22 +163,35 @@ func (rw *responseWriter) Status() int {
 	return rw.status
 }
 
-func loggingMiddleware(next http.Handler, slaMs int64) http.Handler {
+func loggingMiddleware(next http.Handler, route string, slaMs int64) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		finishInflight := trackInflight("http")
+		defer finishInflight()
+
 		wrapped := wrapResponseWriter(w)
 		next.ServeHTTP(wrapped, r)
-		difference := time.Since(start).Milliseconds()
+		duration := time.Since(start)
+
+		observeHTTPRequest(r.Method, route, wrapped.Status(), duration)
+		switch outcome := authOutcomeFromContext(r.Context()); outcome {
+		case "":
+			recordAuthDecision("http", "anonymous")
+		case "allowed":
+			recordAuthDecision("http", "allowed")
+		}
+
 		if Log != nil {
 			Log.Info("Request completed",
 				zap.Int("statuscode", wrapped.Status()),
 				zap.String("method", r.Method),
+				zap.String("route", route),
 				zap.String("path", r.URL.EscapedPath()),
-				zap.String("request_id", requestIDFromContext(r.Context())),
-				zap.Int64("duration", difference))
+				zap.String("request_id", RequestIDFromContext(r.Context())),
+				zap.Int64("duration", duration.Milliseconds()))
 		}
-		if slaMs > 0 && difference > slaMs && Log != nil {
-			Log.Warn("SLA contract exceeded", zap.Int64("SLA", slaMs), zap.String("method", r.Method), zap.String("path", r.URL.EscapedPath()), zap.Int64("duration", difference))
+		if slaMs > 0 && duration.Milliseconds() > slaMs && Log != nil {
+			Log.Warn("SLA contract exceeded", zap.Int64("SLA", slaMs), zap.String("method", r.Method), zap.String("route", route), zap.Int64("duration", duration.Milliseconds()))
 		}
 	})
 }
@@ -183,19 +251,19 @@ func mergeAuthResults(results ...authResult) authResult {
 
 func applyAuthResult(ctx context.Context, result authResult) context.Context {
 	if len(result.Roles) > 0 {
-		ctx = context.WithValue(ctx, ContextOAuthRoles, result.Roles)
+		ctx = context.WithValue(ctx, contextOAuthRoles, result.Roles)
 	}
 	if result.Token != "" {
-		ctx = context.WithValue(ctx, ContextOAuthClientToken, result.Token)
+		ctx = context.WithValue(ctx, contextOAuthClientToken, result.Token)
 	}
 	if result.Issuer != "" {
-		ctx = context.WithValue(ctx, ContextOAuthIssuer, result.Issuer)
+		ctx = context.WithValue(ctx, contextOAuthIssuer, result.Issuer)
 	}
 	if result.Username != "" {
-		ctx = context.WithValue(ctx, ContextOAuthPreferredUsername, result.Username)
+		ctx = context.WithValue(ctx, contextOAuthPreferredUsername, result.Username)
 	}
 	if len(result.LocalClaims) > 0 {
-		ctx = context.WithValue(ctx, ContextLocalJwtClaims, result.LocalClaims)
+		ctx = context.WithValue(ctx, contextLocalJwtClaims, result.LocalClaims)
 	}
 	return ctx
 }
@@ -229,11 +297,14 @@ func anyAuthMiddleware(inner http.Handler, verifiers ...authVerifier) http.Handl
 		}
 
 		if len(results) == 0 {
+			recordAuthDecision("http", "denied")
 			writeAuthError(w, lastErr)
 			return
 		}
 
-		inner.ServeHTTP(w, r.WithContext(applyAuthResult(r.Context(), mergeAuthResults(results...))))
+		ctx := applyAuthResult(r.Context(), mergeAuthResults(results...))
+		ctx = context.WithValue(ctx, contextAuthOutcome, "allowed")
+		inner.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -244,13 +315,16 @@ func allAuthMiddleware(inner http.Handler, verifiers ...authVerifier) http.Handl
 		for _, verifier := range verifiers {
 			result, err := verifier(r)
 			if err != nil {
+				recordAuthDecision("http", "denied")
 				writeAuthError(w, err)
 				return
 			}
 			results = append(results, result)
 		}
 
-		inner.ServeHTTP(w, r.WithContext(applyAuthResult(r.Context(), mergeAuthResults(results...))))
+		ctx := applyAuthResult(r.Context(), mergeAuthResults(results...))
+		ctx = context.WithValue(ctx, contextAuthOutcome, "allowed")
+		inner.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -501,15 +575,6 @@ func allowedContentTypeMiddleware(inner http.Handler, contentTypeConfig string) 
 
 func basicAuthMiddleware(inner http.Handler, users map[string]string) http.Handler {
 	return allAuthMiddleware(inner, basicAuthVerifier(users))
-}
-
-func AllowCorsForLocalDevelopment(inner http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Add("Access-Control-Allow-Origin", "*")
-		w.Header().Add("Access-Control-Allow-Methods", "*")
-		w.Header().Add("Access-Control-Allow-Headers", "*")
-		inner.ServeHTTP(w, r)
-	})
 }
 
 func localJwtAuthMiddleware(next http.Handler) http.Handler {

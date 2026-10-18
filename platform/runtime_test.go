@@ -21,7 +21,9 @@ func TestInitializeVaultWithConfiguredAddress(t *testing.T) {
 	cfg.Vault.Token.Token = "vault-token"
 	SetPlatformConfiguration(*cfg)
 
-	initializeVault()
+	if err := initializeVault(cfg); err != nil {
+		t.Fatalf("initializeVault failed: %v", err)
+	}
 
 	if !vaultEnabled || !vaultInitialized {
 		t.Fatalf("expected Vault to be initialized, enabled=%v initialized=%v", vaultEnabled, vaultInitialized)
@@ -30,8 +32,10 @@ func TestInitializeVaultWithConfiguredAddress(t *testing.T) {
 		t.Fatalf("expected one Vault client, got %d", len(vaultClientList))
 	}
 
-	// A second call must not rebuild the clients.
-	initializeVault()
+	// Re-running initialization resets and rebuilds the clients without leaking.
+	if err := initializeVault(cfg); err != nil {
+		t.Fatalf("second initializeVault failed: %v", err)
+	}
 	if len(vaultClientList) != 1 {
 		t.Fatalf("expected the Vault clients to stay stable, got %d", len(vaultClientList))
 	}
@@ -77,7 +81,9 @@ func TestOAuthTokenRenewalLoopPopulatesCache(t *testing.T) {
 	}}
 	SetPlatformConfiguration(*cfg)
 
-	initializeOAuthTokenClients()
+	if err := initializeOAuthTokenClients(cfg); err != nil {
+		t.Fatalf("initializeOAuthTokenClients failed: %v", err)
+	}
 	t.Cleanup(stopOAuthTokenRenewal)
 
 	deadline := time.Now().Add(5 * time.Second)

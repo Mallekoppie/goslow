@@ -247,6 +247,7 @@ func TestAllowedContentTypeMiddleware(t *testing.T) {
 	router, err := newRouter(Routes{{
 		Path:               "/json",
 		Method:             http.MethodPost,
+		Auth:               AuthNone,
 		AllowedContentType: "application/json",
 		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)

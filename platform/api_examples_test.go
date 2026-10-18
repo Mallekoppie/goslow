@@ -107,16 +107,13 @@ func Example_getComponentConfiguration() {
 }
 
 func Example_routeAuthStrategies() {
-	cfg := createDefaultConfiguration()
-	cfg.Auth.Server.LocalJwt.Enabled = true
-
-	strategies, err := routeAuthStrategies(cfg, Route{AuthRequired: true})
+	strategies, err := routeAuthStrategies(Route{Auth: AuthLocalJWT})
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println(strategies)
 
-	explicit, err := routeAuthStrategies(cfg, Route{Auth: AuthLocalOrOIDC})
+	explicit, err := routeAuthStrategies(Route{Auth: AuthLocalOrOIDC})
 	if err != nil {
 		panic(err)
 	}
@@ -135,6 +132,7 @@ func Example_requestIDMiddleware() {
 	router, err := newRouter(Routes{{
 		Path:   "/ping",
 		Method: http.MethodGet,
+		Auth:   AuthNone,
 		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 		},
