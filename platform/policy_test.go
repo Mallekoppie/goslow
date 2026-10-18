@@ -138,17 +138,6 @@ func TestHTTPExclusionListConflictsWithExplicitAuth(t *testing.T) {
 	}
 }
 
-func TestConnectAuthStrategyConflictWithLegacyList(t *testing.T) {
-	cfg := createDefaultConfiguration()
-	cfg.Auth.Server.UnauthenticatedPaths = []string{"/a"}
-	cfg.Grpc.Server.UnAuthenticatedPaths = []string{"/b"}
-	SetPlatformConfiguration(*cfg)
-
-	if _, err := publicPaths(cfg); !errors.Is(err, ErrConflictingUnauthenticatedPaths) {
-		t.Fatalf("expected ErrConflictingUnauthenticatedPaths, got %v", err)
-	}
-}
-
 func TestHTTPCORSAllowList(t *testing.T) {
 	cfg := setupTestPlatformState(t)
 	cfg.HTTP.Server.AllowedOrigins = []string{"https://app.example"}

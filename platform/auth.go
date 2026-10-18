@@ -21,10 +21,6 @@ const (
 // routes must declare AuthNone explicitly so authentication never fails open.
 var ErrRouteAuthStrategyRequired = errors.New("route auth strategy is required; use AuthNone for public routes")
 
-// ErrConflictingUnauthenticatedPaths is returned when both the unified and the
-// legacy gRPC-only exclusion lists are configured.
-var ErrConflictingUnauthenticatedPaths = errors.New("set only auth.server.unauthenticatedpaths; grpc.server.unauthenticatedpaths is deprecated")
-
 // ErrConnectAuthStrategyRequired is returned when Connect auth is enabled but no
 // explicit strategy was configured.
 var ErrConnectAuthStrategyRequired = errors.New("grpc.server.auth is required when local jwt or oauth is enabled")
@@ -83,20 +79,12 @@ func (m publicPathMatcher) matches(method, pathValue string) bool {
 	return false
 }
 
-// publicPaths resolves the unified exclusion list and migrates the legacy
-// gRPC-only list.
+// publicPaths resolves the unified exclusion list.
 func publicPaths(conf *Config) (publicPathMatcher, error) {
 	if conf == nil {
 		return newPublicPathMatcher(nil), nil
 	}
-	if len(conf.Auth.Server.UnauthenticatedPaths) > 0 && len(conf.Grpc.Server.UnAuthenticatedPaths) > 0 {
-		return publicPathMatcher{}, ErrConflictingUnauthenticatedPaths
-	}
-
-	if len(conf.Auth.Server.UnauthenticatedPaths) > 0 {
-		return newPublicPathMatcher(conf.Auth.Server.UnauthenticatedPaths), nil
-	}
-	return newPublicPathMatcher(conf.Grpc.Server.UnAuthenticatedPaths), nil
+	return newPublicPathMatcher(conf.Auth.Server.UnauthenticatedPaths), nil
 }
 
 func (a AuthStrategy) Enabled() bool {

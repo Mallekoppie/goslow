@@ -242,9 +242,10 @@ func main() {
 ```
 
 Auth interceptors install automatically from config (local JWT and/or OAuth) for
-unary and streaming RPCs, on TLS and plaintext listeners. `Grpc.Server.UnAuthenticatedPaths`
-bypasses auth for specific procedures. Set `ConnectServerOptions.DisableAuthFromConfig`
-to install your own interceptors instead.
+unary and streaming RPCs, on TLS and plaintext listeners. `Grpc.Server.Auth` must
+name the strategy; `Auth.Server.UnauthenticatedPaths` bypasses auth for specific
+procedures. Per-procedure roles come from `Grpc.Server.ProcedureRoles`. Set
+`ConnectServerOptions.DisableAuthFromConfig` to install your own interceptors instead.
 
 Clients pick the wire protocol: `connect.WithGRPC()` for native gRPC,
 `connect.WithGRPCWeb()` for browsers, or no option for the Connect protocol.
@@ -298,6 +299,24 @@ Preflight requests are answered with exact-origin CORS headers from
 validation. When TLS is disabled the handler is wrapped in h2c so native gRPC
 clients can use plaintext HTTP/2.
 
+### Combined Application Server
+
+`StartApplicationServerWithContext` serves Connect RPCs, HTTP routes, and an SPA or
+static assets on one listener:
+
+```go
+err := platform.StartApplicationServerWithContext(ctx, platform.ApplicationServerOptions{
+    Services:     []platform.ConnectService{&Server{}},
+    ServiceNames: []string{"gen.HelloService"},
+    Routes:       routes,
+    SPA:          &platform.SPAOptions{Assets: uiFS, Index: "index.html"},
+})
+```
+
+RPC-shaped requests never fall through to HTTP routes or assets. The server-level
+write timeout is disabled so streaming RPCs stay open; each HTTP route is instead
+bounded by `http.server.writetimeoutseconds` and returns `503` when it overruns.
+
 ### Custom Listener
 
 Applications that need to own the listener and `http.Server` can build the
@@ -346,7 +365,8 @@ func main() {
 `SetPlatformConfiguration` applies defaults, validates, publishes atomically, and
 initializes logging, Vault, and OAuth client renewal. It returns an error for
 invalid configuration (for example an unknown log level or wildcard CORS origin)
-and never publishes partially valid state.
+and never publishes partially valid state: if runtime initialization fails the
+previously published configuration is restored and nothing new is cached.
 
 ### Configuration Defaults
 
@@ -357,6 +377,7 @@ these defaults:
 | --- | --- |
 | `log.level` | `info` |
 | `http.server.listeningaddress` | `127.0.0.1:10000` |
+| `grpc.server.listeningaddress` | `127.0.0.1:9001` |
 | `http.server.readheadertimeoutseconds` | `5` |
 | `http.server.readtimeoutseconds` | `30` |
 | `http.server.writetimeoutseconds` | `60` |
@@ -429,8 +450,7 @@ Rules:
 - Excluded routes may omit `Route.Auth`; declaring a real strategy on an excluded
   route is a startup error.
 - Connect procedures listed here bypass the auth interceptor.
-- `grpc.server.unauthenticatedpaths` is deprecated; configuring both lists fails
-  startup. `/metrics` is never on the application origin, so it needs no entry.
+- `/metrics` is never on the application origin, so it needs no entry.
 
 ### Local Login Flow
 
@@ -496,7 +516,9 @@ the server context.
 
 `grpc.server.healthenabled` registers `grpc.health.v1.Health` for the service names
 in `ConnectServerOptions.ServiceNames`; `grpc.server.reflectionenabled` registers
-the v1 and v1alpha reflection handlers. Both are disabled by default and are meant
+the v1 and v1alpha reflection handlers. Names must be fully qualified, for example
+`gen.HelloService`. Enabling either without service names fails handler construction
+instead of registering an empty checker. Both are disabled by default and are meant
 for development and tests. With reflection enabled:
 
 ```bash
@@ -538,7 +560,6 @@ err := platform.Database.BoltDb.Update(func(tx *bbolt.Tx) error {
 `Snapshot(io.Writer)` writes a consistent copy that can be reopened with bbolt, `Integrity()`
 runs bbolt's structural check, and `Stats()` returns bbolt statistics. `DeleteDatabase(path)`
 removes a specific database file and only closes the open handle when the path matches.
-`RemoveDBFile()` remains as a deprecated wrapper around the configured path.
 
 ### HTTP Server Lifecycle
 
@@ -604,4 +625,20 @@ go test -tags integration ./platform
 
 The platform tests avoid shared global state by resetting configuration, database handles,
 and token-renewal goroutines between tests, so each test also passes in isolation.
+
+### Dependencies
+
+The root module pins tooling and libraries that work with Go 1.25:
+
+- `connectrpc.com/connect` v1.21.0. v1.21.1 requires Go 1.26, so the patch upgrade
+  waits for the toolchain bump.
+- `google.golang.org/protobuf` v1.36.12, `go.etcd.io/bbolt` v1.5.0, and
+  `github.com/coreos/go-oidc/v3` v3.21.0.
+- `.devcontainer/Dockerfile` pins `gopls`, `staticcheck`, `dlv`, `protoc-gen-go`,
+  and `protoc-gen-connect-go` to versions compatible with `GO_VERSION`; bump them
+  together with the image. CI installs the same `staticcheck` v0.7.0.
+
+Every module under `example/` carries its own `go.mod` with a `replace` to the
+repository root. Run `go mod tidy` inside an example after changing root
+dependencies.
 

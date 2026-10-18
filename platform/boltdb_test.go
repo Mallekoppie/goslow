@@ -58,8 +58,8 @@ func TestDBCleanup(t *testing.T) {
 		t.Fatalf("expected testItem, got %q", resultObject.Id)
 	}
 
-	if err := Database.BoltDb.RemoveDBFile(); err != nil {
-		t.Fatalf("RemoveDBFile failed: %v", err)
+	if err := DeleteDatabase(path); err != nil {
+		t.Fatalf("DeleteDatabase failed: %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected DB file %q to be removed, stat err=%v", path, err)

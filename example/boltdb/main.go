@@ -65,7 +65,7 @@ func main() {
 
 	// 6. Cleanup - Remove DB file
 	fmt.Println("\n6. Cleanup - Removing database file...")
-	cleanupExample()
+	cleanupExample(config.Database.BoltDB.FileName)
 
 	fmt.Println("\n=== Example completed successfully ===")
 }
@@ -189,9 +189,9 @@ func removeBucketExample() {
 	}
 }
 
-func cleanupExample() {
+func cleanupExample(dbPath string) {
 	// Remove the database file
-	err := platform.Database.BoltDb.RemoveDBFile()
+	err := platform.DeleteDatabase(dbPath)
 	if err != nil {
 		log.Printf("Error removing database file: %v", err)
 	} else {

@@ -52,8 +52,8 @@ type ConnectServerOptions struct {
 	// and reflection. They are required when those features are enabled.
 	ServiceNames []string
 	// AllowedOrigins is the CORS allow-list for browser gRPC-Web traffic. An
-	// empty list falls back to grpc.server.allowedorigins and then to
-	// http.server.AllowCorsForLocalDevelopment ("*").
+	// empty list falls back to grpc.server.allowedorigins. Entries must be
+	// exact origins; wildcards are rejected configuration.
 	AllowedOrigins []string
 	// TLSEnabled serves HTTPS/HTTP2 instead of plaintext (h2c).
 	TLSEnabled bool
@@ -109,6 +109,10 @@ func NewConnectHandler(options ConnectServerOptions) (http.Handler, error) {
 		conf = createDefaultConfiguration()
 	}
 	initializeMetrics(conf)
+
+	if (conf.Grpc.Server.HealthEnabled || conf.Grpc.Server.ReflectionEnabled) && len(options.ServiceNames) == 0 {
+		return nil, errors.New("grpc health/reflection require ConnectServerOptions.ServiceNames (fully qualified service names such as wdid.v1.AuthService)")
+	}
 
 	handlerOptions, err := buildConnectHandlerOptions(conf, options)
 	if err != nil {

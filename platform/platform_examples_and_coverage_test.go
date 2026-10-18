@@ -208,8 +208,8 @@ func TestBoltDBRoundTripAndCleanup(t *testing.T) {
 	if err := Database.BoltDb.RemoveBucket("people"); err != nil {
 		t.Fatalf("RemoveBucket failed: %v", err)
 	}
-	if err := Database.BoltDb.RemoveDBFile(); err != nil {
-		t.Fatalf("RemoveDBFile failed: %v", err)
+	if err := DeleteDatabase(path); err != nil {
+		t.Fatalf("DeleteDatabase failed: %v", err)
 	}
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Fatalf("expected db file to be removed from %q, stat err=%v", path, statErr)

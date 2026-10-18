@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -18,6 +19,10 @@ import (
 var (
 	metricsOnce     sync.Once
 	metricsRegistry *prometheus.Registry
+	metricsActive   atomic.Bool
+
+	metricsListenerLock    sync.Mutex
+	metricsListenerRunning bool
 
 	httpRequestsTotal   *prometheus.CounterVec
 	httpRequestDuration *prometheus.HistogramVec
@@ -27,10 +32,12 @@ var (
 	inflightRequests    *prometheus.GaugeVec
 )
 
-// initializeMetrics builds the dedicated registry once. Metrics are only
-// available when enabled, and are never mounted on the application origin.
+// initializeMetrics builds the dedicated registry once and ties recording to the
+// active configuration. The registry is process-lifetime: disabling metrics
+// stops recording, and re-enabling resumes into the same families.
 func initializeMetrics(cfg *Config) {
 	if cfg == nil || !cfg.Metrics.Enabled {
+		metricsActive.Store(false)
 		return
 	}
 
@@ -77,10 +84,12 @@ func initializeMetrics(cfg *Config) {
 
 		metricsRegistry = registry
 	})
+
+	metricsActive.Store(true)
 }
 
 func metricsEnabled() bool {
-	return metricsRegistry != nil
+	return metricsActive.Load() && metricsRegistry != nil
 }
 
 // MetricsHandler exposes the dedicated registry. It is intended to be served on
@@ -133,14 +142,28 @@ func StartMetricsServerWithContext(ctx context.Context) error {
 }
 
 // startMetricsServerIfEnabled launches the isolated metrics listener alongside a
-// server. Shutdown follows the shared context.
+// server. Repeated calls while a listener is running are no-ops, so configuration
+// changes or repeated server starts cannot bind the address twice.
 func startMetricsServerIfEnabled(ctx context.Context, conf *Config) {
 	if conf == nil || !conf.Metrics.Enabled {
 		return
 	}
 	initializeMetrics(conf)
 
+	metricsListenerLock.Lock()
+	if metricsListenerRunning {
+		metricsListenerLock.Unlock()
+		return
+	}
+	metricsListenerRunning = true
+	metricsListenerLock.Unlock()
+
 	go func() {
+		defer func() {
+			metricsListenerLock.Lock()
+			metricsListenerRunning = false
+			metricsListenerLock.Unlock()
+		}()
 		if err := StartMetricsServerWithContext(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			Log.Error("metrics server stopped", zap.Error(err))
 		}

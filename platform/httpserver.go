@@ -78,6 +78,10 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 		// Logging wraps auth so 401/403 responses are logged and counted.
 		handler = loggingMiddleware(handler, route.Path, route.SlaMs)
 
+		// HTTP routes are bounded by http.server.writetimeoutseconds. Connect
+		// RPCs bypass this middleware, so streaming responses stay open.
+		handler = boundHTTPRouteWrites(handler, seconds(conf.HTTP.Server.WriteTimeoutSeconds))
+
 		if len(conf.HTTP.Server.AllowedOrigins) > 0 {
 			handler = corsMiddleware(handler, conf.HTTP.Server.AllowedOrigins, false)
 			if route.Method != http.MethodOptions {
@@ -95,6 +99,16 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 	}
 
 	return router, nil
+}
+
+// boundHTTPRouteWrites caps how long a single HTTP route may take to produce
+// its response. When the deadline elapses the caller receives 503 and the
+// handler is abandoned. Non-positive durations disable the bound.
+func boundHTTPRouteWrites(next http.Handler, timeout time.Duration) http.Handler {
+	if timeout <= 0 {
+		return next
+	}
+	return http.TimeoutHandler(next, timeout, `{"error":"request timeout"}`)
 }
 
 // newHTTPServer builds the server with the configured timeouts.
@@ -198,11 +212,6 @@ func StartHttpServerWithContext(ctx context.Context, routes Routes) error {
 	}
 
 	return serveRoutes(ctx, router)
-}
-
-// Deprecated: Use StartHttpServerWithWeb
-func StartHttpServerWithHtmlHosting(routes Routes, dist embed.FS) error {
-	return StartHttpServerWithWeb(routes, dist)
 }
 
 func StartHttpServerWithWeb(routes Routes, dist embed.FS) error {

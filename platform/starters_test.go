@@ -26,8 +26,8 @@ func TestStartServerHelpersReportListenErrors(t *testing.T) {
 	if err := StartHttpServerWithWeb(Routes{}, assets); err == nil {
 		t.Fatal("expected StartHttpServerWithWeb to report the listen error")
 	}
-	if err := StartHttpServerWithHtmlHosting(Routes{}, assets); err == nil {
-		t.Fatal("expected StartHttpServerWithHtmlHosting to report the listen error")
+	if err := StartHttpServerWithWeb(Routes{}, assets); err == nil {
+		t.Fatal("expected StartHttpServerWithWeb to report the listen error")
 	}
 
 	if err := StartConnectServerWithContext(context.Background(), ConnectServerOptions{}); err == nil {

@@ -16,7 +16,6 @@ platform:
       tlsenabled: false
       # CORS is exact-origin only; wildcards are rejected. List the Flutter
       # development origin explicitly when needed.
-      AllowCorsForLocalDevelopment: false
       allowedorigins: []
       # Default JSON body limit in bytes (1 MiB when omitted).
       maxrequestbodybytes: 1048576

@@ -10,5 +10,5 @@ var dist embed.FS
 
 func main() {
 	//platform.StartHttpServer(Routes)
-	platform.StartHttpServerWithHtmlHosting(Routes, dist)
+	platform.StartHttpServerWithWeb(Routes, dist)
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	bbolt "go.etcd.io/bbolt"
+	bolterrors "go.etcd.io/bbolt/errors"
 	"go.uber.org/zap"
 )
 
@@ -276,7 +277,7 @@ func (d *boltDbDatabase) RemoveBucket(bucket string) error {
 	}
 	return dbBolt.Update(func(tx *bbolt.Tx) error {
 		err := tx.DeleteBucket([]byte(bucket))
-		if err != nil && err == bbolt.ErrBucketNotFound {
+		if err != nil && errors.Is(err, bolterrors.ErrBucketNotFound) {
 			return nil
 		}
 		if err != nil {
@@ -287,21 +288,6 @@ func (d *boltDbDatabase) RemoveBucket(bucket string) error {
 		}
 		return nil
 	})
-}
-
-func (d *boltDbDatabase) RemoveDBFile() error {
-	if Log != nil {
-		Log.Debug("Removing BoltDB file")
-	}
-	conf, err := GetPlatformConfiguration()
-	if err != nil || conf == nil {
-		return err
-	}
-	fileName := conf.Database.BoltDB.FileName
-	if fileName == "" {
-		fileName = "./bolt.db"
-	}
-	return DeleteDatabase(fileName)
 }
 
 // DeleteDatabase removes the bolt database at the supplied path. The open handle is

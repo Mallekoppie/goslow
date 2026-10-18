@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/go-oidc"
+	"github.com/coreos/go-oidc/v3/oidc"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )

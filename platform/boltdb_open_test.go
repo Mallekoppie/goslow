@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	bbolt "go.etcd.io/bbolt"
+	bolterrors "go.etcd.io/bbolt/errors"
 )
 
 func TestOpenBoltDBCreatesParentDirectoryWithRestrictedMode(t *testing.T) {
@@ -79,8 +79,8 @@ func TestOpenBoltDBLockTimeoutIsReported(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the second open to fail while the file is locked")
 	}
-	if !errors.Is(err, bbolt.ErrTimeout) {
-		t.Fatalf("expected bbolt.ErrTimeout in the chain, got %v", err)
+	if !errors.Is(err, bolterrors.ErrTimeout) {
+		t.Fatalf("expected bolt errors.ErrTimeout in the chain, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "locked by another process") {
 		t.Fatalf("expected a lock hint in the error, got %v", err)

@@ -31,9 +31,9 @@ func SavePlatformConfiguration(conf Config) error {
 	return writePlatformConfiguration(conf)
 }
 
-// SetPlatformConfiguration validates programmatic configuration, publishes it,
-// and initializes logger, Vault, and OAuth client renewal. Invalid configuration
-// is never published.
+// SetPlatformConfiguration validates programmatic configuration, initializes
+// runtime subsystems, and publishes only after initialization succeeds. On
+// failure the previously published configuration (if any) is restored.
 func SetPlatformConfiguration(conf Config) error {
 	cfg := conf
 	applyDefaults(&cfg)
@@ -41,14 +41,22 @@ func SetPlatformConfiguration(conf Config) error {
 		return err
 	}
 
-	publishConfiguration(&cfg)
-	return applyRuntimeConfiguration(&cfg)
+	previous := publishConfiguration(&cfg)
+	if err := applyRuntimeConfiguration(&cfg); err != nil {
+		publishConfiguration(previous)
+		return err
+	}
+	return nil
 }
 
-func publishConfiguration(cfg *Config) {
+// publishConfiguration swaps the active configuration and returns the previous
+// value so callers can roll back.
+func publishConfiguration(cfg *Config) *Config {
 	mutex.Lock()
+	previous := internalConfig
 	internalConfig = cfg
 	mutex.Unlock()
+	return previous
 }
 
 func GetPlatformConfiguration() (*Config, error) {
@@ -75,8 +83,11 @@ func GetPlatformConfiguration() (*Config, error) {
 		return nil, err
 	}
 
-	publishConfiguration(cfg)
+	previous := publishConfiguration(cfg)
 	if err := applyRuntimeConfiguration(cfg); err != nil {
+		// Do not leave a partially initialized config cached; the next call
+		// retries loading and initialization.
+		publishConfiguration(previous)
 		return nil, err
 	}
 	return cfg, nil
@@ -150,17 +161,16 @@ type Config struct {
 
 	HTTP struct {
 		Server struct {
-			ListeningAddress             string
-			TLSCertFileName              string
-			TLSKeyFileName               string
-			TLSEnabled                   bool
-			AllowCorsForLocalDevelopment bool
-			AllowedOrigins               []string
-			MaxRequestBodyBytes          int64
-			ReadHeaderTimeoutSeconds     int
-			ReadTimeoutSeconds           int
-			WriteTimeoutSeconds          int
-			IdleTimeoutSeconds           int
+			ListeningAddress         string
+			TLSCertFileName          string
+			TLSKeyFileName           string
+			TLSEnabled               bool
+			AllowedOrigins           []string
+			MaxRequestBodyBytes      int64
+			ReadHeaderTimeoutSeconds int
+			ReadTimeoutSeconds       int
+			WriteTimeoutSeconds      int
+			IdleTimeoutSeconds       int
 		}
 		Clients []HTTPClientConfig
 	}
@@ -171,7 +181,6 @@ type Config struct {
 			TLSCertFileName          string
 			TLSKeyFileName           string
 			TLSEnabled               bool
-			UnAuthenticatedPaths     []string
 			Auth                     AuthStrategy
 			ProcedureRoles           map[string][]string
 			HealthEnabled            bool
@@ -317,6 +326,12 @@ func applyDefaults(conf *Config) {
 	if conf.HTTP.Server.ReadHeaderTimeoutSeconds <= 0 {
 		conf.HTTP.Server.ReadHeaderTimeoutSeconds = 5
 	}
+	if conf.HTTP.Server.ListeningAddress == "" {
+		conf.HTTP.Server.ListeningAddress = "127.0.0.1:10000"
+	}
+	if conf.Grpc.Server.ListeningAddress == "" {
+		conf.Grpc.Server.ListeningAddress = "127.0.0.1:9001"
+	}
 	if conf.HTTP.Server.ReadTimeoutSeconds <= 0 {
 		conf.HTTP.Server.ReadTimeoutSeconds = 30
 	}
@@ -366,9 +381,6 @@ func validateConfiguration(conf *Config) error {
 	}
 	if err := validateOrigins("grpc.server.allowedorigins", conf.Grpc.Server.AllowedOrigins); err != nil {
 		return err
-	}
-	if len(conf.Auth.Server.UnauthenticatedPaths) > 0 && len(conf.Grpc.Server.UnAuthenticatedPaths) > 0 {
-		return ErrConflictingUnauthenticatedPaths
 	}
 	return nil
 }

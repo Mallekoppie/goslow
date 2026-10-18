@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	bbolt "go.etcd.io/bbolt"
+	bolterrors "go.etcd.io/bbolt/errors"
 )
 
 // describeBoltOpenError adds the file details an operator needs when a database
@@ -16,7 +16,7 @@ func describeBoltOpenError(path string, err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, bbolt.ErrTimeout) {
+	if errors.Is(err, bolterrors.ErrTimeout) {
 		return fmt.Errorf("bolt DB %q is locked by another process (timeout): %w", path, err)
 	}
 
