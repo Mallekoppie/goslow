@@ -296,8 +296,10 @@ func main() {
 
 Preflight requests are answered with exact-origin CORS headers from
 `Grpc.Server.AllowedOrigins`; wildcard origins are rejected by configuration
-validation. When TLS is disabled the handler is wrapped in h2c so native gRPC
-clients can use plaintext HTTP/2.
+validation. When TLS is disabled the serving `http.Server` sets
+`http.Protocols` to unencrypted HTTP/2 (h2c) plus HTTP/1.1, so native gRPC
+clients can use plaintext HTTP/2. If you mount `NewConnectHandler` on your own
+server, set `http.Server.Protocols` (HTTP/1.1 plus unencrypted HTTP/2) yourself.
 
 ### Combined Application Server
 
@@ -628,15 +630,22 @@ and token-renewal goroutines between tests, so each test also passes in isolatio
 
 ### Dependencies
 
-The root module pins tooling and libraries that work with Go 1.25:
+The root module and every example module target Go 1.27.2:
 
-- `connectrpc.com/connect` v1.21.0. v1.21.1 requires Go 1.26, so the patch upgrade
-  waits for the toolchain bump.
-- `google.golang.org/protobuf` v1.36.12, `go.etcd.io/bbolt` v1.5.0, and
-  `github.com/coreos/go-oidc/v3` v3.21.0.
-- `.devcontainer/Dockerfile` pins `gopls`, `staticcheck`, `dlv`, `protoc-gen-go`,
-  and `protoc-gen-connect-go` to versions compatible with `GO_VERSION`; bump them
-  together with the image. CI installs the same `staticcheck` v0.7.0.
+- `connectrpc.com/connect` v1.21.1 (Connect, gRPC, and gRPC-Web transport),
+  with `grpchealth` v1.5.0 and `grpcreflect` v1.3.1.
+- `google.golang.org/protobuf` v1.36.12, `go.etcd.io/bbolt` v1.5.0,
+  `github.com/coreos/go-oidc/v3` v3.21.0, and `github.com/go-jose/go-jose/v4`
+  v4.1.6 for JWKS handling. The archived `github.com/lestrrat/go-jwx` dependency
+  was removed.
+- `github.com/spf13/viper` v1.21.0, `go.uber.org/zap` v1.28.0,
+  `github.com/prometheus/client_golang` v1.25.0, `github.com/hashicorp/vault/api`
+  v1.23.0, `github.com/golang-jwt/jwt/v5` v5.3.1, and
+  `gopkg.in/natefinch/lumberjack.v2` v2.2.1.
+- `.devcontainer/Dockerfile` pins `gopls` v0.24.0, `staticcheck` v0.8.2, `dlv`
+  v1.27.2, `protoc-gen-go` v1.36.12, and `protoc-gen-connect-go` v1.21.1, all
+  compatible with `GO_VERSION`; bump them together with the image. CI installs
+  the same `staticcheck` v0.8.2.
 
 Every module under `example/` carries its own `go.mod` with a `replace` to the
 repository root. Run `go mod tidy` inside an example after changing root

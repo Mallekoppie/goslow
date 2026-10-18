@@ -1,10 +1,9 @@
 # syntax=docker/dockerfile:1
 
-# goslow is a multi-module Go workspace: the root module targets Go 1.25,
-# while example modules pin older versions. A Go 1.25 toolchain builds those
-# fine; note this image sets GOTOOLCHAIN=local, so nothing newer than 1.25 can
-# be pulled in automatically.
-ARG GO_VERSION=1.25
+# goslow is a multi-module Go workspace: the root module targets Go 1.27,
+# while example modules pin matching versions. This image sets GOTOOLCHAIN=local,
+# so nothing newer than 1.27 can be pulled in automatically.
+ARG GO_VERSION=1.27
 FROM mcr.microsoft.com/devcontainers/go:${GO_VERSION}-bookworm
 
 ENV GOPATH=/go
@@ -34,11 +33,11 @@ USER vscode
 # version. The image sets GOTOOLCHAIN=local, so `@latest` breaks the build as
 # soon as a tool starts requiring a newer Go (e.g. gopls v0.24 needs Go 1.27).
 # Bump these together with GO_VERSION above.
-ARG GOPLS_VERSION=v0.21.1
-ARG STATICCHECK_VERSION=v0.7.0
+ARG GOPLS_VERSION=v0.24.0
+ARG STATICCHECK_VERSION=v0.8.2
 ARG DELVE_VERSION=v1.27.2
 ARG PROTOC_GEN_GO_VERSION=v1.36.12
-ARG PROTOC_GEN_CONNECT_GO_VERSION=v1.21.0
+ARG PROTOC_GEN_CONNECT_GO_VERSION=v1.21.1
 
 RUN go install golang.org/x/tools/gopls@${GOPLS_VERSION} \
     && go install honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION} \

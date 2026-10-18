@@ -33,7 +33,7 @@ staticcheck -version
 if command -v protoc-gen-connect-go >/dev/null 2>&1; then
   protoc-gen-connect-go --version 2>/dev/null || echo "    protoc-gen-connect-go installed"
 else
-  echo "    ! protoc-gen-connect-go missing: go install connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.21.0"
+  echo "    ! protoc-gen-connect-go missing: go install connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.21.1"
 fi
 
 cat <<'EOF'

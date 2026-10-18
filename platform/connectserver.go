@@ -11,8 +11,6 @@ import (
 	"connectrpc.com/grpchealth"
 	"connectrpc.com/grpcreflect"
 	"go.uber.org/zap"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 // ConnectService is implemented by generated Connect service handlers. A
@@ -156,9 +154,8 @@ func NewConnectHandler(options ConnectServerOptions) (http.Handler, error) {
 	}
 	handler = corsMiddleware(handler, allowedOrigins, true)
 
-	if !options.TLSEnabled {
-		handler = h2c.NewHandler(handler, &http2.Server{})
-	}
+	// The server enables unencrypted HTTP/2 (h2c) via http.Server.Protocols
+	// when TLS is disabled; see configureHTTPProtocols.
 
 	return handler, nil
 }

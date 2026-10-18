@@ -1,12 +1,12 @@
 # goslow devcontainer
 
-Go 1.25 development container for the goslow platform and its example modules.
+Go 1.27 development container for the goslow platform and its example modules.
 
 ## What is included
 
 | Item | Why |
 | --- | --- |
-| `mcr.microsoft.com/devcontainers/go:1.25-bookworm` | Matches the root `go.mod`. `GOTOOLCHAIN=auto` covers older example modules. |
+| `mcr.microsoft.com/devcontainers/go:1.27-bookworm` | Matches the root `go.mod`. `GOTOOLCHAIN=local` keeps builds on the image toolchain. |
 | `protobuf-compiler`, `make`, `jq` | `example/grpc-auth` and `example/grpc-web-server` Makefiles call `protoc`. |
 | `gopls`, `staticcheck`, `dlv`, `protoc-gen-go`, `protoc-gen-connect-go` | Editor tooling plus Connect code generation for the gRPC-compatible examples. |
 | Named volumes for `/go/pkg/mod` and the build cache | Keeps `-race` builds fast and off the workspace bind mount. |

@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
+	jose "github.com/go-jose/go-jose/v4"
 	jwt "github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat/go-jwx/jwk"
 	"go.uber.org/zap"
 )
 
@@ -45,7 +45,7 @@ type oAuthOrganiser struct{}
 
 type idpDetailsCacheItem struct {
 	JwkUrl       string
-	KeySet       *jwk.Set
+	KeySet       jose.JSONWebKeySet
 	SetPopulated bool
 }
 
@@ -397,8 +397,8 @@ func (o oAuthOrganiser) ValidateClientToken(rawToken string) (parsedToken *jwt.T
 		details = idpDetailsCacheItem{JwkUrl: jwksURL}
 	}
 
-	if !details.SetPopulated || details.KeySet == nil {
-		set, fetchErr := jwk.FetchHTTP(details.JwkUrl)
+	if !details.SetPopulated {
+		set, fetchErr := fetchIssuerKeySet(details.JwkUrl)
 		if fetchErr != nil {
 			Log.Error("Unable to fetch the issuer JWKS", zap.String("jwks_url", details.JwkUrl), zap.Error(fetchErr))
 			return nil, claims, fetchErr
@@ -417,8 +417,8 @@ func (o oAuthOrganiser) ValidateClientToken(rawToken string) (parsedToken *jwt.T
 			return nil, errors.New("expecting JWT header to have string kid")
 		}
 
-		if key := details.KeySet.LookupKeyID(keyID); len(key) == 1 {
-			return key[0].Materialize()
+		if key := details.KeySet.Key(keyID); len(key) == 1 {
+			return key[0].Key, nil
 		}
 
 		return nil, fmt.Errorf("unable to find key %q", keyID)
@@ -429,6 +429,35 @@ func (o oAuthOrganiser) ValidateClientToken(rawToken string) (parsedToken *jwt.T
 	}
 
 	return parsedToken, claims, nil
+}
+
+// fetchIssuerKeySet downloads and parses an issuer JWKS document. The response
+// body is bounded so an unexpected upstream cannot exhaust memory.
+func fetchIssuerKeySet(jwksURL string) (jose.JSONWebKeySet, error) {
+	var set jose.JSONWebKeySet
+
+	response, err := ensureOAuthHTTPClient().Get(jwksURL)
+	if err != nil {
+		return set, err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return set, fmt.Errorf("issuer JWKS returned status %d", response.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return set, err
+	}
+	if err := json.Unmarshal(body, &set); err != nil {
+		return set, fmt.Errorf("unable to decode issuer JWKS: %w", err)
+	}
+	if len(set.Keys) == 0 {
+		return set, errors.New("issuer JWKS contained no keys")
+	}
+
+	return set, nil
 }
 
 func getJksUrl(issuerUrl string) (url string, err error) {

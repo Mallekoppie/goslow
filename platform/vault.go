@@ -1,11 +1,8 @@
 package platform
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"time"
 
@@ -156,33 +153,17 @@ func (v *platformVault) GetSecrets(path string) (secrets map[string]string, err 
 
 			break
 		} else if conf.Vault.Cert.Enabled {
-			request := c.NewRequest("POST", "/v1/auth/cert/login")
-			response, err := c.RawRequest(request)
+			loginSecret, err := c.Logical().Write("auth/cert/login", map[string]interface{}{})
 			if err != nil {
-				Log.Error("Error loging in to Vault with cert to get token", zap.Error(err))
+				Log.Error("Error logging in to Vault with cert to get token", zap.Error(err))
+				continue
+			}
+			if loginSecret == nil || loginSecret.Auth == nil || loginSecret.Auth.ClientToken == "" {
+				Log.Error("Vault cert login returned no client token")
 				continue
 			}
 
-			if response.StatusCode != http.StatusOK {
-				Log.Error("Incorrect responsecode from Vault when logging in with Cert", zap.Int("response_code", response.StatusCode))
-				continue
-			}
-			defer response.Body.Close()
-			responseData, err := io.ReadAll(response.Body)
-			if err != nil {
-				Log.Error("Error reading login response using cert to Vault", zap.Error(err))
-				continue
-			}
-
-			responseModel := vaultLoginResponse{}
-
-			err = json.Unmarshal(responseData, &responseModel)
-			if err != nil {
-				Log.Error("Unable too unmarshal response from vault login", zap.Error(err))
-				continue
-			}
-
-			c.SetToken(responseModel.Auth.ClientToken)
+			c.SetToken(loginSecret.Auth.ClientToken)
 
 			secretResult, err := c.Logical().Read(path)
 			if err != nil {
@@ -209,32 +190,4 @@ func (v *platformVault) GetSecrets(path string) (secrets map[string]string, err 
 	}
 
 	return secrets, nil
-}
-
-type vaultLoginResponse struct {
-	RequestID     string      `json:"request_id"`
-	LeaseID       string      `json:"lease_id"`
-	Renewable     bool        `json:"renewable"`
-	LeaseDuration int         `json:"lease_duration"`
-	Data          interface{} `json:"data"`
-	WrapInfo      interface{} `json:"wrap_info"`
-	Warnings      interface{} `json:"warnings"`
-	Auth          struct {
-		ClientToken   string   `json:"client_token"`
-		Accessor      string   `json:"accessor"`
-		Policies      []string `json:"policies"`
-		TokenPolicies []string `json:"token_policies"`
-		Metadata      struct {
-			AuthorityKeyID string `json:"authority_key_id"`
-			CertName       string `json:"cert_name"`
-			CommonName     string `json:"common_name"`
-			SerialNumber   string `json:"serial_number"`
-			SubjectKeyID   string `json:"subject_key_id"`
-		} `json:"metadata"`
-		LeaseDuration int    `json:"lease_duration"`
-		Renewable     bool   `json:"renewable"`
-		EntityID      string `json:"entity_id"`
-		TokenType     string `json:"token_type"`
-		Orphan        bool   `json:"orphan"`
-	} `json:"auth"`
 }

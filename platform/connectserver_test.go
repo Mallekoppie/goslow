@@ -2,7 +2,6 @@ package platform
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"io"
 	"net"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -63,12 +61,20 @@ func newEchoHandler(t *testing.T, options ConnectServerOptions) http.Handler {
 }
 
 func h2cHTTPClient() *http.Client {
-	return &http.Client{Transport: &http2.Transport{
-		AllowHTTP: true,
-		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, network, addr)
-		},
-	}}
+	protocols := new(http.Protocols)
+	protocols.SetUnencryptedHTTP2(true)
+	return &http.Client{Transport: &http.Transport{Protocols: protocols}}
+}
+
+// newH2CTestServer serves the handler over HTTP/1.1 and unencrypted HTTP/2 so
+// the Connect, gRPC-Web, and native gRPC clients can share one listener.
+func newH2CTestServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	server := httptest.NewUnstartedServer(handler)
+	configureHTTPProtocols(server.Config, false)
+	server.Start()
+	t.Cleanup(server.Close)
+	return server
 }
 
 func echoClient(server *httptest.Server, client *http.Client, options ...connect.ClientOption) *connect.Client[wrapperspb.StringValue, wrapperspb.StringValue] {
@@ -82,8 +88,7 @@ func echoClient(server *httptest.Server, client *http.Client, options ...connect
 func TestConnectHandlerServesAllProtocols(t *testing.T) {
 	withTestDB(t) // resets global state without touching gRPC configuration
 	handler := newEchoHandler(t, ConnectServerOptions{DisableAuthFromConfig: true})
-	server := httptest.NewServer(handler)
-	defer server.Close()
+	server := newH2CTestServer(t, handler)
 
 	protocols := []struct {
 		name    string

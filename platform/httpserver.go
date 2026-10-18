@@ -111,6 +111,22 @@ func boundHTTPRouteWrites(next http.Handler, timeout time.Duration) http.Handler
 	return http.TimeoutHandler(next, timeout, `{"error":"request timeout"}`)
 }
 
+// configureHTTPProtocols enables HTTP/1.1 plus HTTP/2: ALPN over TLS, and
+// unencrypted HTTP/2 (h2c) on plaintext listeners so native gRPC clients work.
+func configureHTTPProtocols(server *http.Server, tlsEnabled bool) {
+	if server == nil {
+		return
+	}
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	if tlsEnabled {
+		protocols.SetHTTP2(true)
+	} else {
+		protocols.SetUnencryptedHTTP2(true)
+	}
+	server.Protocols = protocols
+}
+
 // newHTTPServer builds the server with the configured timeouts.
 func newHTTPServer(conf *Config, handler http.Handler) *http.Server {
 	return &http.Server{
@@ -126,6 +142,8 @@ func newHTTPServer(conf *Config, handler http.Handler) *http.Server {
 // serveHTTPServer serves until the context is cancelled, then shuts down
 // gracefully. http.ErrServerClosed is treated as a clean exit.
 func serveHTTPServer(ctx context.Context, server *http.Server, listener net.Listener, tlsEnabled bool, certFile, keyFile string) error {
+	configureHTTPProtocols(server, tlsEnabled)
+
 	serveErrors := make(chan error, 1)
 	go func() {
 		var err error
