@@ -1,9 +1,10 @@
 package platform
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,23 +16,13 @@ import (
 
 var (
 	dbBolt              *bbolt.DB
-	dbBoltMu            sync.Mutex
+	dbBoltMu            sync.RWMutex
 	ErrBoltDBNoDBObject = errors.New("no db object")
 	boltFileMode        = os.FileMode(0o600)
 	defaultOpenTimeout  = 5 * time.Second
 )
 
 type boltDbDatabase struct{}
-
-func describeBoltOpenError(path string, err error) error {
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, bbolt.ErrTimeout) {
-		return fmt.Errorf("bolt DB %q is locked by another process: %w", path, err)
-	}
-	return fmt.Errorf("failed to open bolt DB %q (mode=%#o): %w", path, boltFileMode, err)
-}
 
 func OpenBoltDB(path string, timeout time.Duration) (*bbolt.DB, error) {
 	if path == "" {
@@ -53,7 +44,10 @@ func OpenBoltDB(path string, timeout time.Duration) (*bbolt.DB, error) {
 }
 
 func ensureBoltDB() error {
-	if dbBolt != nil {
+	dbBoltMu.RLock()
+	open := dbBolt != nil
+	dbBoltMu.RUnlock()
+	if open {
 		return nil
 	}
 	conf, err := GetPlatformConfiguration()
@@ -88,12 +82,17 @@ func SetupBoltDB() error {
 		Log.Debug("Setting up BoltDB", zap.String("filename", fileName))
 	}
 
+	timeout := defaultOpenTimeout
+	if conf.Database.BoltDB.OpenTimeoutSeconds > 0 {
+		timeout = time.Duration(conf.Database.BoltDB.OpenTimeoutSeconds) * time.Second
+	}
+
 	dbBoltMu.Lock()
 	defer dbBoltMu.Unlock()
 	if dbBolt != nil {
 		return nil
 	}
-	opened, err := OpenBoltDB(fileName, defaultOpenTimeout)
+	opened, err := OpenBoltDB(fileName, timeout)
 	if err != nil {
 		if Log != nil {
 			Log.Error("Error opening database", zap.Error(err))
@@ -302,22 +301,203 @@ func (d *boltDbDatabase) RemoveDBFile() error {
 	if fileName == "" {
 		fileName = "./bolt.db"
 	}
+	return DeleteDatabase(fileName)
+}
+
+// DeleteDatabase removes the bolt database at the supplied path. The open handle is
+// only closed when it points at the same file, so callers are explicit about what
+// they delete.
+func DeleteDatabase(path string) error {
+	if path == "" {
+		return errors.New("bolt db path is empty")
+	}
+
 	dbBoltMu.Lock()
 	defer dbBoltMu.Unlock()
-	if dbBolt != nil {
+
+	if dbBolt != nil && dbBolt.Path() == path {
 		if err := dbBolt.Close(); err != nil {
-			if Log != nil {
-				Log.Error("Error closing BoltDB", zap.Error(err))
-			}
 			return err
 		}
 		dbBolt = nil
 	}
-	if err := os.Remove(fileName); err != nil && !os.IsNotExist(err) {
-		if Log != nil {
-			Log.Error("Error removing BoltDB file", zap.Error(err))
-		}
+
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
+}
+
+// View runs a read-only transaction. The callback must not call other database
+// methods, because the handle lock is held for the transaction duration.
+func (d *boltDbDatabase) View(fn func(tx *bbolt.Tx) error) error {
+	if fn == nil {
+		return errors.New("nil view function")
+	}
+	if err := ensureBoltDB(); err != nil {
+		return err
+	}
+
+	dbBoltMu.RLock()
+	defer dbBoltMu.RUnlock()
+	if dbBolt == nil {
+		return ErrBoltDBNoDBObject
+	}
+	return dbBolt.View(fn)
+}
+
+// Update runs a read-write transaction. The callback must not call other database
+// methods, because the handle lock is held for the transaction duration.
+func (d *boltDbDatabase) Update(fn func(tx *bbolt.Tx) error) error {
+	if fn == nil {
+		return errors.New("nil update function")
+	}
+	if err := ensureBoltDB(); err != nil {
+		return err
+	}
+
+	dbBoltMu.Lock()
+	defer dbBoltMu.Unlock()
+	if dbBolt == nil {
+		return ErrBoltDBNoDBObject
+	}
+	return dbBolt.Update(fn)
+}
+
+// Snapshot writes a consistent copy of the database to the supplied writer. The
+// read transaction stays open for the whole copy, so the writer should be fast
+// (typically a file).
+func (d *boltDbDatabase) Snapshot(w io.Writer) error {
+	if w == nil {
+		return errors.New("nil snapshot writer")
+	}
+	return d.View(func(tx *bbolt.Tx) error {
+		_, err := tx.WriteTo(w)
+		return err
+	})
+}
+
+// Integrity verifies the database structure and returns the first inconsistency.
+func (d *boltDbDatabase) Integrity() error {
+	return d.View(func(tx *bbolt.Tx) error {
+		for err := range tx.Check() {
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Stats returns a copy of the bolt database statistics.
+func (d *boltDbDatabase) Stats() (bbolt.Stats, error) {
+	if err := ensureBoltDB(); err != nil {
+		return bbolt.Stats{}, err
+	}
+
+	dbBoltMu.RLock()
+	defer dbBoltMu.RUnlock()
+	if dbBolt == nil {
+		return bbolt.Stats{}, ErrBoltDBNoDBObject
+	}
+	return dbBolt.Stats(), nil
+}
+
+// SaveObjects stores several objects in a single transaction.
+func (d *boltDbDatabase) SaveObjects(bucket string, objects map[string]interface{}) error {
+	if len(objects) == 0 {
+		return nil
+	}
+	if err := ensureBoltDB(); err != nil {
+		return err
+	}
+
+	dbBoltMu.Lock()
+	defer dbBoltMu.Unlock()
+	if dbBolt == nil {
+		return ErrBoltDBNoDBObject
+	}
+	return dbBolt.Update(func(tx *bbolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
+		if err != nil {
+			return err
+		}
+		for id, object := range objects {
+			data, err := json.Marshal(object)
+			if err != nil {
+				return err
+			}
+			if err := b.Put([]byte(id), data); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Keys returns the bucket keys in lexicographic order.
+func (d *boltDbDatabase) Keys(bucket string) ([]string, error) {
+	keys := make([]string, 0)
+	err := d.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		if b == nil {
+			return ErrNoEntryFoundInDB
+		}
+		return b.ForEach(func(key, _ []byte) error {
+			keys = append(keys, string(key))
+			return nil
+		})
+	})
+	return keys, err
+}
+
+// Scan calls fn for every entry in the bucket in key order.
+func (d *boltDbDatabase) Scan(bucket string, fn func(key, value []byte) error) error {
+	if fn == nil {
+		return errors.New("nil scan function")
+	}
+	return d.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		if b == nil {
+			return ErrNoEntryFoundInDB
+		}
+		return b.ForEach(fn)
+	})
+}
+
+// ScanPrefix calls fn for every entry whose key starts with prefix, in key order.
+func (d *boltDbDatabase) ScanPrefix(bucket, prefix string, fn func(key, value []byte) error) error {
+	if fn == nil {
+		return errors.New("nil scan function")
+	}
+	return d.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		if b == nil {
+			return ErrNoEntryFoundInDB
+		}
+		prefixBytes := []byte(prefix)
+		cursor := b.Cursor()
+		for key, value := cursor.Seek(prefixBytes); key != nil && bytes.HasPrefix(key, prefixBytes); key, value = cursor.Next() {
+			if err := fn(key, value); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Count returns the number of entries in the bucket.
+func (d *boltDbDatabase) Count(bucket string) (int, error) {
+	count := 0
+	err := d.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		if b == nil {
+			return ErrNoEntryFoundInDB
+		}
+		return b.ForEach(func(_, _ []byte) error {
+			count++
+			return nil
+		})
+	})
+	return count, err
 }

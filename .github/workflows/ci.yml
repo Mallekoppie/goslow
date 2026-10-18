@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  platform:
+    name: platform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: test -z "$(gofmt -l . )" || (gofmt -l . && exit 1)
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: unit tests (race)
+        run: go test -race ./...
+
+  examples:
+    name: examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: build example modules
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/example-build"
+          for dir in $(find example -name go.mod -exec dirname {} \;); do
+            echo "::group::${dir}"
+            (cd "${dir}" && go build -o "${RUNNER_TEMP}/example-build/" ./...)
+            echo "::endgroup::"
+          done

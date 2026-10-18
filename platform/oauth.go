@@ -26,6 +26,8 @@ var (
 	oAuthDefaultTLSConfig          = &tls.Config{InsecureSkipVerify: true}
 	oAuthTokens                    map[string]string
 	oAuthStateLock                 sync.RWMutex
+	oAuthRenewStop                 chan struct{}
+	oAuthRenewWG                   sync.WaitGroup
 
 	OAuth oAuthOrganiser
 
@@ -54,77 +56,155 @@ func init() {
 }
 
 func initializeOAuthTokenClients() {
-	if len(internalConfig.Auth.Client.OAuth) > 0 {
-		oAuthStateLock.Lock()
-		oAuthTokens = make(map[string]string, len(internalConfig.Auth.Client.OAuth))
-		oAuthClientTokenConfiguration = make([]clientTokenConfig, 0, len(internalConfig.Auth.Client.OAuth))
-		oAuthClientTokenEnabled = true
-		oAuthStateLock.Unlock()
+	// Restart cleanly if this is called more than once (for example from tests).
+	stopOAuthTokenRenewal()
 
-		for _, v := range internalConfig.Auth.Client.OAuth {
-			if internalConfig.Vault.Enabled && len(v.VaultPath) > 0 {
-				secrets, err := Vault.GetSecrets(v.VaultPath)
-				if err != nil {
-					Log.Error("Unable to retrieve OAuth client configs from Vault", zap.String("vault_path", v.VaultPath),
-						zap.String("config_id", v.ID),
-						zap.Error(err))
-				}
+	if internalConfig == nil || len(internalConfig.Auth.Client.OAuth) == 0 {
+		return
+	}
 
-				v.vaultClientIdValue = secrets[v.VaultClientIdKey]
-				v.vaultClientSecretValue = secrets[v.VaultClientSecretKey]
-				v.vaultUsernameValue = secrets[v.VaultUsernameKey]
-				v.vaultPasswordValue = secrets[v.VaultPasswordKey]
-				v.vaultIdpTokenEndpointValue = secrets[v.VaultIdpTokenEndpointKey]
-				v.vaultEnabled = true
+	oAuthStateLock.Lock()
+	oAuthTokens = make(map[string]string, len(internalConfig.Auth.Client.OAuth))
+	oAuthClientTokenConfiguration = make([]clientTokenConfig, 0, len(internalConfig.Auth.Client.OAuth))
+	oAuthClientTokenEnabled = true
+	oAuthRenewStop = make(chan struct{})
+	oAuthStateLock.Unlock()
+
+	for _, v := range internalConfig.Auth.Client.OAuth {
+		if internalConfig.Vault.Enabled && len(v.VaultPath) > 0 {
+			secrets, err := Vault.GetSecrets(v.VaultPath)
+			if err != nil {
+				Log.Error("Unable to retrieve OAuth client configs from Vault", zap.String("vault_path", v.VaultPath),
+					zap.String("config_id", v.ID),
+					zap.Error(err))
 			}
 
-			oAuthStateLock.Lock()
-			oAuthClientTokenConfiguration = append(oAuthClientTokenConfiguration, v)
-			oAuthStateLock.Unlock()
-
-			go autoRenewOAuth2Token(v)
+			v.vaultClientIdValue = secrets[v.VaultClientIdKey]
+			v.vaultClientSecretValue = secrets[v.VaultClientSecretKey]
+			v.vaultUsernameValue = secrets[v.VaultUsernameKey]
+			v.vaultPasswordValue = secrets[v.VaultPasswordKey]
+			v.vaultIdpTokenEndpointValue = secrets[v.VaultIdpTokenEndpointKey]
+			v.vaultEnabled = true
 		}
+
+		oAuthStateLock.Lock()
+		oAuthClientTokenConfiguration = append(oAuthClientTokenConfiguration, v)
+		stop := oAuthRenewStop
+		oAuthStateLock.Unlock()
+
+		// Do not start a renewal loop that can only fail: without an endpoint
+		// there is nothing to call. GetToken still reports the misconfiguration
+		// when a caller actually asks for a token.
+		hasEndpoint := len(v.IdpTokenEndpoint) > 0 || (v.vaultEnabled && len(v.vaultIdpTokenEndpointValue) > 0)
+		if !hasEndpoint {
+			Log.Warn("Skipping OAuth token auto-renewal: no token endpoint configured", zap.String("config_id", v.ID))
+			continue
+		}
+
+		if stop == nil {
+			continue
+		}
+
+		oAuthRenewWG.Add(1)
+		go func(cfg clientTokenConfig, stop <-chan struct{}) {
+			defer oAuthRenewWG.Done()
+			autoRenewOAuth2Token(cfg, stop)
+		}(v, stop)
 	}
 }
 
-func autoRenewOAuth2Token(config clientTokenConfig) {
-	currentToken := ""
-	// Always renew
+// stopOAuthTokenRenewal stops all token renewal goroutines and waits for them to exit.
+func stopOAuthTokenRenewal() {
+	oAuthStateLock.Lock()
+	if oAuthRenewStop != nil {
+		close(oAuthRenewStop)
+		oAuthRenewStop = nil
+	}
+	oAuthStateLock.Unlock()
+
+	oAuthRenewWG.Wait()
+}
+
+// waitOrStop returns false when the renewal loop was asked to stop.
+func waitOrStop(stop <-chan struct{}, duration time.Duration) bool {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+
+	select {
+	case <-stop:
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func autoRenewOAuth2Token(config clientTokenConfig, stop <-chan struct{}) {
+	// Always renew on start
 	currentExpiryTime := time.Now().Add(-(time.Minute * 60))
-	for true {
-		if time.Since(currentExpiryTime).Minutes() > -(config.RenewCheckTimeMinutes) {
+
+	checkMinutes := config.RenewCheckTimeMinutes
+	if checkMinutes <= 0 {
+		checkMinutes = 5
+	}
+	interval := time.Duration(config.RenewCheckIntervalSeconds) * time.Second
+	if interval <= 0 {
+		interval = time.Minute
+	}
+
+	for {
+		if time.Since(currentExpiryTime).Minutes() > -checkMinutes {
 			Log.Info("Renewing token", zap.String("config_id", config.ID))
 			auth2Token, err := internalGetOAuth2Token(config.ID)
 			if err != nil {
 				Log.Error("Error getting token. Waiting before retrying", zap.Error(err))
-				time.Sleep(time.Second * 5)
+				if !waitOrStop(stop, 5*time.Second) {
+					return
+				}
 				continue
 			}
-			currentToken = auth2Token
-			currentExpiryTime = getExpiryTimeFromToken(currentToken)
+
+			currentExpiryTime = getExpiryTimeFromToken(auth2Token)
+			if currentExpiryTime.IsZero() {
+				currentExpiryTime = time.Now().Add(time.Duration(checkMinutes) * time.Minute)
+			}
+
 			oAuthStateLock.Lock()
-			oAuthTokens[config.ID] = currentToken
+			if oAuthTokens == nil {
+				oAuthTokens = make(map[string]string)
+			}
+			oAuthTokens[config.ID] = auth2Token
 			oAuthStateLock.Unlock()
 
 			Log.Info("Token renewed", zap.String("config_id", config.ID), zap.Time("next_expiry", currentExpiryTime))
 		}
 
-		time.Sleep(time.Duration(config.RenewCheckIntervalSeconds) * time.Second)
+		if !waitOrStop(stop, interval) {
+			return
+		}
 	}
 }
 
 func getExpiryTimeFromToken(data string) time.Time {
-	// This is probably bad...
-	token, _ := jwt.Parse(data, func(token *jwt.Token) (interface{}, error) {
-		return token, nil
-	})
+	// Tokens from some identity providers are opaque, so failure here is not fatal.
+	// Claims are read without verifying the signature: the token has already been
+	// fetched from the IDP by the time this runs.
+	parser := &jwt.Parser{}
+	token, _, err := parser.ParseUnverified(data, jwt.MapClaims{})
+	if err != nil || token == nil {
+		return time.Time{}
+	}
 
-	claims := token.Claims.(jwt.MapClaims)
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return time.Time{}
+	}
 
-	exp := claims["exp"].(float64)
-	result := time.Unix(int64(exp), 0)
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		return time.Time{}
+	}
 
-	return result
+	return time.Unix(int64(exp), 0)
 }
 
 func createOAuthHTTPClient() *http.Client {
@@ -171,6 +251,7 @@ func internalGetOAuth2Token(id string) (accessToken string, err error) {
 
 	if len(clientConfig.ID) < 1 {
 		Log.Error("Found no OAuth2 client config", zap.String("config_id", id))
+		return "", ErrOAuthClientConfigNotFound
 	}
 
 	var url string
@@ -232,43 +313,67 @@ func internalGetOAuth2Token(id string) (accessToken string, err error) {
 	return oauthResponse.AccessToken, nil
 }
 
+func ensureIssuerJwkCache() {
+	oAuthStateLock.Lock()
+	defer oAuthStateLock.Unlock()
+	if issuerJwkUrlMap == nil {
+		issuerJwkUrlMap = make(map[string]idpDetailsCacheItem)
+	}
+}
+
 func (o oAuthOrganiser) ValidateClientToken(rawToken string) (parsedToken *jwt.Token, claims map[string]interface{}, err error) {
-	token, _ := jwt.Parse(rawToken, func(token *jwt.Token) (interface{}, error) {
-		return token, nil
-	})
+	ensureIssuerJwkCache()
 
-	claims = token.Claims.(jwt.MapClaims)
-	issuer := claims["iss"].(string)
-
-	jwksUrl, ok := issuerJwkUrlMap[issuer]
-	if ok == false {
-		jwksUrl = idpDetailsCacheItem{SetPopulated: false}
-		jwksUrl.JwkUrl, err = getJksUrl(issuer)
-		if err != nil {
-			// Error already logged. Just stop execution
-			return
-		}
-
-		// Cache it
-		issuerJwkUrlMap[issuer] = jwksUrl
+	unverified, _, err := new(jwt.Parser).ParseUnverified(rawToken, jwt.MapClaims{})
+	if err != nil {
+		Log.Error("Unable to read client token claims", zap.Error(err))
+		return nil, nil, err
 	}
 
-	parsedToken, err = jwt.Parse(rawToken, func(token *jwt.Token) (interface{}, error) {
-		if jwksUrl.SetPopulated == false {
-			set, err := jwk.FetchHTTP(jwksUrl.JwkUrl)
-			if err != nil {
-				return nil, err
-			}
+	mapClaims, ok := unverified.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, nil, errors.New("client token claims have an unexpected type")
+	}
+	claims = mapClaims
 
-			jwksUrl.KeySet = set
+	issuer, ok := claims["iss"].(string)
+	if !ok || issuer == "" {
+		return nil, claims, errors.New("client token is missing an issuer claim")
+	}
+
+	oAuthStateLock.RLock()
+	details, cached := issuerJwkUrlMap[issuer]
+	oAuthStateLock.RUnlock()
+
+	if !cached {
+		jwksURL, lookupErr := getJksUrl(issuer)
+		if lookupErr != nil {
+			return nil, claims, lookupErr
 		}
+		details = idpDetailsCacheItem{JwkUrl: jwksURL}
+	}
 
+	if !details.SetPopulated || details.KeySet == nil {
+		set, fetchErr := jwk.FetchHTTP(details.JwkUrl)
+		if fetchErr != nil {
+			Log.Error("Unable to fetch the issuer JWKS", zap.String("jwks_url", details.JwkUrl), zap.Error(fetchErr))
+			return nil, claims, fetchErr
+		}
+		details.KeySet = set
+		details.SetPopulated = true
+	}
+
+	oAuthStateLock.Lock()
+	issuerJwkUrlMap[issuer] = details
+	oAuthStateLock.Unlock()
+
+	parsedToken, err = jwt.Parse(rawToken, func(token *jwt.Token) (interface{}, error) {
 		keyID, ok := token.Header["kid"].(string)
 		if !ok {
 			return nil, errors.New("expecting JWT header to have string kid")
 		}
 
-		if key := jwksUrl.KeySet.LookupKeyID(keyID); len(key) == 1 {
+		if key := details.KeySet.LookupKeyID(keyID); len(key) == 1 {
 			return key[0].Materialize()
 		}
 

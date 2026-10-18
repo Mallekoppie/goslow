@@ -22,10 +22,36 @@ type Logger struct {
 	internalLogger *zap.Logger
 }
 
-func (l *Logger) Info(msg string, fields ...zap.Field)  { l.internalLogger.Info(msg, fields...) }
-func (l *Logger) Error(msg string, fields ...zap.Field) { l.internalLogger.Error(msg, fields...) }
-func (l *Logger) Debug(msg string, fields ...zap.Field) { l.internalLogger.Debug(msg, fields...) }
-func (l *Logger) Warn(msg string, fields ...zap.Field)  { l.internalLogger.Warn(msg, fields...) }
+func (l *Logger) logger() *zap.Logger {
+	if l == nil {
+		return nil
+	}
+	return l.internalLogger
+}
+
+func (l *Logger) Info(msg string, fields ...zap.Field) {
+	if logger := l.logger(); logger != nil {
+		logger.Info(msg, fields...)
+	}
+}
+
+func (l *Logger) Error(msg string, fields ...zap.Field) {
+	if logger := l.logger(); logger != nil {
+		logger.Error(msg, fields...)
+	}
+}
+
+func (l *Logger) Debug(msg string, fields ...zap.Field) {
+	if logger := l.logger(); logger != nil {
+		logger.Debug(msg, fields...)
+	}
+}
+
+func (l *Logger) Warn(msg string, fields ...zap.Field) {
+	if logger := l.logger(); logger != nil {
+		logger.Warn(msg, fields...)
+	}
+}
 
 func init() {
 	InitializeLogger()

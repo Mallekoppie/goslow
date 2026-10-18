@@ -40,10 +40,17 @@ import (
 //}
 
 func TestReadConfig(t *testing.T) {
+	resetPlatformState(t)
 
 	config, err := GetPlatformConfiguration()
 	if err != nil {
-		t.Fail()
+		t.Fatalf("GetPlatformConfiguration failed: %v", err)
+	}
+	if config == nil {
+		t.Fatal("expected a platform configuration, got nil")
+	}
+	if config.Log.Level == "" {
+		t.Fatal("expected the log level to be defaulted")
 	}
 
 	log.Println(config)

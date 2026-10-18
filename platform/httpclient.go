@@ -14,8 +14,16 @@ var (
 )
 
 func CreateHttpClient(id string) (*http.Client, error) {
+	conf, err := GetPlatformConfiguration()
+	if err != nil {
+		return nil, err
+	}
+	if conf == nil {
+		return nil, ErrHttpClientConfigNotFound
+	}
+
 	var clientConfig httpClientConfig
-	for _, v := range internalConfig.HTTP.Clients {
+	for _, v := range conf.HTTP.Clients {
 		if v.ID == id {
 			clientConfig = v
 			break

@@ -8,21 +8,47 @@ import (
 	"github.com/spf13/viper"
 )
 
+// TestMain stops the OAuth renewal goroutines before the test binary exits so
+// they cannot log into a closing stdout or race with package teardown.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	stopOAuthTokenRenewal()
+	os.Exit(code)
+}
+
 func resetPlatformState(t *testing.T) {
 	t.Helper()
+
+	// Stop background token renewal before clearing the state it depends on.
+	stopOAuthTokenRenewal()
+
 	mutex.Lock()
-	defer mutex.Unlock()
 	internalConfig = nil
+	mutex.Unlock()
+
 	dbBoltMu.Lock()
 	if dbBolt != nil {
 		_ = dbBolt.Close()
 		dbBolt = nil
 	}
 	dbBoltMu.Unlock()
+
+	oAuthStateLock.Lock()
 	oAuthTokens = nil
+	oAuthClientTokenConfiguration = nil
+	oAuthClientTokenEnabled = false
+	oAuthStateLock.Unlock()
+
 	issuerJwkUrlMap = nil
+
+	vaultClientList = nil
+	vaultEnabled = false
+	vaultInitialized = false
+
 	viper.Reset()
-	Log = nil
+
+	// Never leave a nil logger behind: background code paths log unconditionally.
+	ConfigureLoggerWithConfig(createDefaultConfiguration())
 }
 
 func seedConfig(t *testing.T) {

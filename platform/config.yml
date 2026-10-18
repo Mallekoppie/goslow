@@ -15,6 +15,11 @@ platform:
       tlskeyfilename: ""
       tlsenabled: false
       AllowCorsForLocalDevelopment: true
+      # Server timeouts in seconds. Omit to use the defaults (5/30/60/120).
+      readheadertimeoutseconds: 5
+      readtimeoutseconds: 30
+      writetimeoutseconds: 60
+      idletimeoutseconds: 120
     clients:
     - id: default
       tlsverify: false
@@ -30,6 +35,9 @@ platform:
         enabled: false
         idpwellknownurl: ""
         clientid: ""
+        # Claim that carries roles. Literal key first (e.g. a Zitadel URN),
+        # then a dotted path. Supports string lists and object keys.
+        rolesclaim: roles
         allowedalgorithms:
         - rs256
         - rs384
@@ -67,6 +75,8 @@ platform:
     boltdb:
       enabled: true
       filename: ./bolt.db
+      # How long to wait for the file lock before failing. Defaults to 5.
+      opentimeoutseconds: 5
   vault:
     enabled: false
     addresslist:

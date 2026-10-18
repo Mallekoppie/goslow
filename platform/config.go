@@ -21,6 +21,12 @@ func writePlatformConfiguration(conf Config) error {
 	return viper.WriteConfig()
 }
 
+// SavePlatformConfiguration writes the supplied configuration to the file viper
+// loaded. It returns the underlying viper error when no config file is in use.
+func SavePlatformConfiguration(conf Config) error {
+	return writePlatformConfiguration(conf)
+}
+
 func SetPlatformConfiguration(conf Config) {
 	mutex.Lock()
 	internalConfig = &conf
@@ -66,7 +72,10 @@ func GetPlatformConfiguration() (*Config, error) {
 }
 
 func GetComponentConfiguration(key string, object interface{}) error {
-	err := viper.UnmarshalKey(key, &object)
+	if object == nil {
+		return errors.New("nil component configuration target")
+	}
+	err := viper.UnmarshalKey(key, object)
 	if err != nil {
 		if Log != nil {
 			Log.Error("Unable to read component configuration", zap.String("configkey", key), zap.Error(err))
@@ -93,8 +102,12 @@ type Config struct {
 			TLSKeyFileName               string
 			TLSEnabled                   bool
 			AllowCorsForLocalDevelopment bool
+			ReadHeaderTimeoutSeconds     int
+			ReadTimeoutSeconds           int
+			WriteTimeoutSeconds          int
+			IdleTimeoutSeconds           int
 		}
-		Clients []httpClientConfig
+		Clients []HTTPClientConfig
 	}
 
 	Grpc struct {
@@ -114,6 +127,7 @@ type Config struct {
 				IdpWellKnownURL   string
 				ClientID          string
 				AllowedAlgorithms []string
+				RolesClaim        string
 			}
 			LocalJwt struct {
 				Enabled          bool
@@ -137,8 +151,9 @@ type Config struct {
 
 	Database struct {
 		BoltDB struct {
-			Enabled  bool
-			FileName string
+			Enabled            bool
+			FileName           string
+			OpenTimeoutSeconds int64
 		}
 	}
 
@@ -170,6 +185,12 @@ type httpClientConfig struct {
 	RequestTimeout     int
 }
 
+// HTTPClientConfig is the exported alias for the per-client HTTP configuration.
+type HTTPClientConfig = httpClientConfig
+
+// ClientTokenConfig is the exported alias for the OAuth client token configuration.
+type ClientTokenConfig = clientTokenConfig
+
 type clientTokenConfig struct {
 	ID                         string
 	IdpWellKnownURL            string
@@ -200,6 +221,24 @@ func (conf *Config) checkPlatformConfiguration() error {
 	}
 	if conf.Log.Level == "" {
 		conf.Log.Level = "info"
+	}
+	if conf.Database.BoltDB.OpenTimeoutSeconds <= 0 {
+		conf.Database.BoltDB.OpenTimeoutSeconds = 5
+	}
+	if conf.HTTP.Server.ReadHeaderTimeoutSeconds <= 0 {
+		conf.HTTP.Server.ReadHeaderTimeoutSeconds = 5
+	}
+	if conf.HTTP.Server.ReadTimeoutSeconds <= 0 {
+		conf.HTTP.Server.ReadTimeoutSeconds = 30
+	}
+	if conf.HTTP.Server.WriteTimeoutSeconds <= 0 {
+		conf.HTTP.Server.WriteTimeoutSeconds = 60
+	}
+	if conf.HTTP.Server.IdleTimeoutSeconds <= 0 {
+		conf.HTTP.Server.IdleTimeoutSeconds = 120
+	}
+	if conf.Auth.Server.OAuth.RolesClaim == "" {
+		conf.Auth.Server.OAuth.RolesClaim = "roles"
 	}
 	if conf.Log.FilePath == "" {
 		log.Println("Configuration Log.FiePath is empty. Defaulting to ./default.log")

@@ -41,7 +41,7 @@ func main() {
 	}
 	defer platform.Database.BoltDb.Close()
 
-	fmt.Println("=== BoltDB Example Application ===\n")
+	fmt.Println("=== BoltDB Example Application ===")
 
 	// 1. Save objects
 	fmt.Println("1. Saving objects to database...")

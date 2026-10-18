@@ -2,15 +2,20 @@ package platform
 
 import "testing"
 
-func configurePlatformForLocalJwtTests() {
-	internalConfig.Auth.Server.LocalJwt.Enabled = true
-	internalConfig.Auth.Server.LocalJwt.JwtSigningKey = "test"
-	internalConfig.Auth.Server.LocalJwt.JwtSigningMethod = "HS256"
+func configurePlatformForLocalJwtTests(t *testing.T) {
+	t.Helper()
+	resetPlatformState(t)
+
+	cfg := createDefaultConfiguration()
+	cfg.Auth.Server.LocalJwt.Enabled = true
+	cfg.Auth.Server.LocalJwt.JwtSigningKey = "test"
+	cfg.Auth.Server.LocalJwt.JwtSigningMethod = "HS256"
+	SetPlatformConfiguration(*cfg)
 }
 
 // Test to create a JWT token
 func TestCreateJWTToken(t *testing.T) {
-	configurePlatformForLocalJwtTests()
+	configurePlatformForLocalJwtTests(t)
 	claims := map[string]interface{}{
 		"sub": "testuser",
 		"aud": "testaudience",
@@ -31,7 +36,7 @@ func TestCreateJWTToken(t *testing.T) {
 
 // Test to validate a JWT token
 func TestValidateJWTToken(t *testing.T) {
-	configurePlatformForLocalJwtTests()
+	configurePlatformForLocalJwtTests(t)
 
 	claims := map[string]interface{}{
 		"sub": "testuser",

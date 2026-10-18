@@ -103,12 +103,16 @@ func StartGrpcServer(services []GRPCService) {
 }
 
 func grpcAuthInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
-	if len(internalConfig.Grpc.Server.UnAuthenticatedPaths) > 0 {
-		for _, path := range internalConfig.Grpc.Server.UnAuthenticatedPaths {
-			if path == info.FullMethod {
-				Log.Info("Skipping auth for unauthenticated path", zap.String("path", path))
-				return handler(ctx, req)
-			}
+	conf, confErr := GetPlatformConfiguration()
+	if confErr != nil || conf == nil {
+		Log.Error("Unable to load platform configuration for gRPC auth", zap.Error(confErr))
+		return nil, status.Errorf(codes.Internal, "platform configuration unavailable")
+	}
+
+	for _, path := range conf.Grpc.Server.UnAuthenticatedPaths {
+		if path == info.FullMethod {
+			Log.Info("Skipping auth for unauthenticated path", zap.String("path", path))
+			return handler(ctx, req)
 		}
 	}
 
@@ -125,14 +129,16 @@ func grpcAuthInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInf
 		Log.Error("Missing authorization in metadata", zap.Any("metadata", md))
 		return nil, ErrGRPCInvalidToken
 	}
-	token := strings.TrimPrefix(authorization[0], "Bearer ")
-	// Perform the token validation here. For the sake of this example, the code
-	// here forgoes any of the usual OAuth2 token validation and instead checks
-	// for a token matching an arbitrary string.
+	token, ok := bearerToken(authorization[0])
+	if !ok {
+		Log.Error("authorization metadata is not a bearer token")
+		return nil, ErrGRPCInvalidToken
+	}
+
 	claims, err := LocalJwt.ValidateLocalJwtToken(token)
 	if err != nil {
 		Log.Error("failed to validate GRPC token", zap.Error(err))
-		return false, ErrGRPCInvalidToken
+		return nil, ErrGRPCInvalidToken
 	}
 
 	// Store the claims in the context

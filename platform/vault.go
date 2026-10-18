@@ -135,8 +135,13 @@ func (v *platformVault) GetSecrets(path string) (secrets map[string]string, err 
 		return secrets, ErrVaultNotEnabled
 	}
 
+	conf, confErr := GetPlatformConfiguration()
+	if confErr != nil || conf == nil {
+		return secrets, confErr
+	}
+
 	for _, c := range vaultClientList {
-		if internalConfig.Vault.Token.Enabled {
+		if conf.Vault.Token.Enabled {
 			secretResult, err := c.Logical().Read(path)
 			if err != nil {
 				Log.Error("Error retrieving secret with token", zap.Error(err), zap.String("address", c.Address()))
@@ -150,7 +155,7 @@ func (v *platformVault) GetSecrets(path string) (secrets map[string]string, err 
 			}
 
 			break
-		} else if internalConfig.Vault.Cert.Enabled {
+		} else if conf.Vault.Cert.Enabled {
 			request := c.NewRequest("POST", "/v1/auth/cert/login")
 			response, err := c.RawRequest(request)
 			if err != nil {
