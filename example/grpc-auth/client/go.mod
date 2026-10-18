@@ -1,6 +1,6 @@
 module grpc-client
 
-go 1.24.5
+go 1.25.5
 
 replace github.com/Mallekoppie/goslow => ../../../
 
@@ -9,7 +9,6 @@ require (
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.74.2
 	google.golang.org/protobuf v1.36.7
-
 )
 
 require (

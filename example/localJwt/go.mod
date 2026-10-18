@@ -1,6 +1,6 @@
 module github.com/Mallekoppie/goslow/example/localJwt
 
-go 1.24.3
+go 1.25.5
 
 require github.com/Mallekoppie/goslow v0.0.0-20250602123527-274e6a3300a0
 

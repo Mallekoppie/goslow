@@ -1,6 +1,6 @@
 module http-web-server
 
-go 1.20
+go 1.25.5
 
 replace github.com/Mallekoppie/goslow => ../../
 

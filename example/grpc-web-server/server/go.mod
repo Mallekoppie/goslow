@@ -1,6 +1,6 @@
 module grpc-server
 
-go 1.24.5
+go 1.25.5
 
 replace github.com/Mallekoppie/goslow => ../../../
 
