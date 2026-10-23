@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues live in GitHub Issues for Mallekoppie/goslow. See `docs/agents/issue-tracker.md`.
+Issues live as markdown files under `.scratch/<feature>/` in this repo. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
