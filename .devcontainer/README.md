@@ -10,23 +10,84 @@ Go 1.27 development container for the goslow platform and its example modules.
 | `protobuf-compiler`, `make`, `jq` | `example/grpc-auth` and `example/grpc-web-server` Makefiles call `protoc`. |
 | `gopls`, `staticcheck`, `dlv`, `protoc-gen-go`, `protoc-gen-connect-go` | Editor tooling plus Connect code generation for the gRPC-compatible examples. |
 | Named volumes for `/go/pkg/mod` and the build cache | Keeps `-race` builds fast and off the workspace bind mount. |
-| `post-create.sh` | Downloads modules for the root module and every example module. |
+| Node.js | LTS (devcontainer feature); required by Claude Code. |
+| Claude Code | latest (devcontainer feature); `claude` CLI + VS Code extension. |
+| `post-create.sh` | Downloads modules for the root module and every example module, reports the toolchain, installs the skills plugin. |
 
 ## Opening the project
 
 1. VS Code: **Dev Containers: Reopen in Container**.
-2. The container user is `vscode`; `updateRemoteUserUID` aligns it with your host UID on Linux.
+2. The container user is `vscode`, mapped through rootless Podman's keep-id so
+   it matches the host UID that owns the workspace.
 
 ## Podman notes (Bazzite / Fedora Atomic)
 
-- `runArgs` already contains `--security-opt label=disable` because SELinux
-  cannot label the bind-mounted workspace.
+- `runArgs` contains `--userns=keep-id` so the container's uid 1000 matches the
+  host uid (1000) that owns the bind-mounted workspace and the named volumes.
+- `--security-opt label=disable` is required because SELinux cannot label the
+  bind-mounted workspace.
 - VS Code needs to be pointed at Podman once (user settings, not repo settings):
   `"dev.containers.dockerPath": "podman"`.
-- If files in `/workspaces/goslow` appear owned by `root` inside the container,
-  switch to keep-id mapping:
-  - add `"--userns=keep-id"` to `runArgs` in `devcontainer.json`
-  - set `"updateRemoteUserUID": false`
+- `--userns=keep-id` is a Podman flag; if you open this repo with Docker instead,
+  remove it from `runArgs`.
+
+## Claude Code
+
+Claude Code is installed by the official dev container feature:
+
+```json
+"features": {
+  "ghcr.io/devcontainers/features/node:1": {},
+  "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+}
+```
+
+The Go base image ships nvm but does not install a Node version, so the Node
+feature comes first — the Claude feature declares an `installsAfter` dependency
+on it. The feature then installs the `claude` CLI globally and adds the Claude
+Code VS Code extension, so the tool works both from the integrated terminal and
+from the extension panel.
+
+### Host environment
+
+`remoteEnv` copies these variables from the host into terminals, tasks and
+extensions in the container:
+
+* `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`
+* `ANTHROPIC_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS`, `ANTHROPIC_MODEL`
+* `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU,FABLE}_MODEL`
+
+Export them on the host before opening or rebuilding the container, e.g.
+`export ANTHROPIC_API_KEY=...`. Unset variables arrive as empty strings and are
+ignored by Claude Code. To forward another variable, add
+`"NAME": "${localEnv:NAME}"` to `remoteEnv` and rebuild.
+
+### Authentication and persistence
+
+If no API key or token is forwarded, run `claude` in the container and complete
+the browser sign-in. If the callback does not reach the container, copy the code
+shown in the browser back into the terminal. Authentication, settings, plugins
+and session history live under `/home/vscode/.claude`, which is the named volume
+`claude-code-config-<id>`, so they survive **Dev Containers: Rebuild Container**.
+`CLAUDE_CONFIG_DIR` points at that volume so `~/.claude.json` is persisted too.
+
+### Matt Pocock skills
+
+`.claude/settings.json` enables `mattpocock-skills` from the official plugin
+marketplace. `post-create.sh` installs it once into the persistent volume:
+
+```bash
+claude plugin install mattpocock-skills \
+  --marketplace anthropics/claude-plugins-official
+```
+
+If the install was skipped (e.g. offline during create), run it manually. Then
+run the setup skill once per repository so the skills know where issues, specs
+and domain docs live:
+
+```text
+/mattpocock-skills:setup-matt-pocock-skills
+```
 
 ## Ports
 
