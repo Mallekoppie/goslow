@@ -7,25 +7,52 @@
     }
   },
 
-  // Needed on SELinux hosts (Bazzite/Fedora Atomic) where Podman cannot apply
-  // a label to the workspace bind mount. Harmless on Docker.
-  "runArgs": ["--security-opt", "label=disable"],
+  // Claude Code CLI + VS Code extension, installed by the official feature.
+  // It needs node/npm. The Go base image ships nvm but installs no Node
+  // version, so install Node explicitly first: the Claude feature declares an
+  // installsAfter dependency on it. (Without this, the feature's own
+  // NodeSource fallback fails on some Debian releases because the distro's
+  // nodejs package no longer pulls in npm.)
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+  },
+
+  // Rootless Podman on SELinux hosts (Bazzite/Fedora Atomic): keep-id makes
+  // the container's uid 1000 match the host uid that owns the bind-mounted
+  // workspace and the named volumes; label=disable is needed because Podman
+  // cannot relabel the workspace bind mount.
+  "runArgs": ["--userns=keep-id", "--security-opt", "label=disable"],
 
   "remoteUser": "vscode",
-  "updateRemoteUserUID": true,
+  "containerUser": "vscode",
 
   // Keep module and build caches off the workspace bind mount. Faster
   // `go test -race ./...` and no host filesystem churn.
+  // Claude Code's config lives in a named volume so login, settings, plugins
+  // and session history survive container rebuilds.
   "mounts": [
     "source=goslow-gomod,target=/go/pkg/mod,type=volume",
-    "source=goslow-gobuild,target=/home/vscode/.cache/go-build,type=volume"
+    "source=goslow-gobuild,target=/home/vscode/.cache/go-build,type=volume",
+    "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume"
   ],
+
+  "containerEnv": {
+    // Keep Claude Code's ~/.claude.json inside the mounted config volume,
+    // otherwise it lands in the ephemeral home directory and is lost on
+    // rebuild (forcing the first-run setup again).
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
+    // The node feature installs Node (and the claude CLI) under nvm, which is
+    // not on the base image's PATH.
+    "PATH": "/usr/local/share/nvm/current/bin:/go/bin:/home/vscode/.local/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  },
 
   "postCreateCommand": "bash .devcontainer/post-create.sh",
 
   "customizations": {
     "vscode": {
       "extensions": [
+        "anthropic.claude-code",
         "golang.go",
         "redhat.vscode-yaml",
         "editorconfig.editorconfig"
@@ -55,5 +82,26 @@
     "9001": { "label": "gRPC examples" },
     "9111": { "label": "HTTP (platform/config.yml)" },
     "10000": { "label": "HTTP default" }
+  },
+
+  // Host environment passed through to terminals, tasks and extensions in
+  // the container. ${localEnv:NAME} copies NAME from the host that runs the
+  // container; unset names resolve to an empty string and are ignored by
+  // Claude Code. Export them on the host before opening/rebuilding, e.g.
+  // `export ANTHROPIC_API_KEY=...`, or run `claude` and sign in once.
+  "remoteEnv": {
+    "PATH": "/usr/local/share/nvm/current/bin:/go/bin:/home/vscode/.local/bin:${containerEnv:PATH}",
+
+    // Claude Code auth, provider routing and model selection.
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
+    "ANTHROPIC_AUTH_TOKEN": "${localEnv:ANTHROPIC_AUTH_TOKEN}",
+    "ANTHROPIC_BASE_URL": "${localEnv:ANTHROPIC_BASE_URL}",
+    "ANTHROPIC_CUSTOM_HEADERS": "${localEnv:ANTHROPIC_CUSTOM_HEADERS}",
+    "ANTHROPIC_MODEL": "${localEnv:ANTHROPIC_MODEL}",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "${localEnv:ANTHROPIC_DEFAULT_OPUS_MODEL}",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "${localEnv:ANTHROPIC_DEFAULT_SONNET_MODEL}",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${localEnv:ANTHROPIC_DEFAULT_HAIKU_MODEL}",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "${localEnv:ANTHROPIC_DEFAULT_FABLE_MODEL}",
+    "CLAUDE_CODE_OAUTH_TOKEN": "${localEnv:CLAUDE_CODE_OAUTH_TOKEN}"
   }
 }

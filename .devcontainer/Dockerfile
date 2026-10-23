@@ -7,7 +7,10 @@ ARG GO_VERSION=1.27
 FROM mcr.microsoft.com/devcontainers/go:${GO_VERSION}-bookworm
 
 ENV GOPATH=/go
-ENV PATH=$GOPATH/bin:$PATH
+# The node devcontainer feature installs Node/npm - and the claude CLI it
+# installs globally - under nvm. Add those locations so non-login shells see
+# them; the profile.d snippet at the end of this file covers login shells.
+ENV PATH=/usr/local/share/nvm/current/bin:/home/vscode/.local/bin:$GOPATH/bin:$PATH
 
 # protoc is needed by example/grpc-auth and example/grpc-web-server Makefiles.
 RUN apt-get update \
@@ -44,3 +47,21 @@ RUN go install golang.org/x/tools/gopls@${GOPLS_VERSION} \
     && go install github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION} \
     && go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION} \
     && go install connectrpc.com/connect/cmd/protoc-gen-connect-go@${PROTOC_GEN_CONNECT_GO_VERSION}
+
+# A login shell (`bash -lc`, which VS Code dev containers and postCreateCommand
+# use) resets PATH from /etc/profile and would otherwise drop the nvm,
+# user-local and Go bin directories. Register them in profile.d so every shell
+# - interactive, login or remote - sees gopls, dlv, claude and friends.
+USER root
+RUN printf '%s\n' \
+        'export PATH="/usr/local/share/nvm/current/bin:/go/bin:/home/vscode/.local/bin:$PATH"' \
+        > /etc/profile.d/00-devcontainer-path.sh \
+    && chmod 0644 /etc/profile.d/00-devcontainer-path.sh
+
+# Pre-create the mount point for Claude Code's config volume (see
+# devcontainer.json). A fresh named volume inherits the ownership of the image
+# path, so this is what makes it writable by the non-root vscode user.
+RUN mkdir -p /home/vscode/.claude \
+    && chown vscode:vscode /home/vscode/.claude
+
+USER vscode
