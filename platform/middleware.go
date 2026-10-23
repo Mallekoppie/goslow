@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -445,47 +444,8 @@ func normalizeAlgorithms(algorithms []string) []string {
 // tried first (Zitadel-style URNs), then as a dotted path. Values may be a list
 // of strings or an object whose keys are the roles.
 func extractRoles(claims map[string]interface{}, claimPath string) []string {
-	if claimPath == "" {
-		claimPath = "roles"
-	}
-
-	var raw interface{}
-	if value, ok := claims[claimPath]; ok {
-		raw = value
-	} else {
-		current := interface{}(claims)
-		for _, part := range strings.Split(claimPath, ".") {
-			object, ok := current.(map[string]interface{})
-			if !ok {
-				current = nil
-				break
-			}
-			current = object[part]
-		}
-		raw = current
-	}
-
-	switch typed := raw.(type) {
-	case []string:
-		return append([]string(nil), typed...)
-	case []interface{}:
-		roles := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if role, ok := item.(string); ok {
-				roles = append(roles, role)
-			}
-		}
-		return roles
-	case map[string]interface{}:
-		roles := make([]string, 0, len(typed))
-		for role := range typed {
-			roles = append(roles, role)
-		}
-		sort.Strings(roles)
-		return roles
-	default:
-		return nil
-	}
+	roles, _ := rolesFromClaim(claims, claimPath)
+	return roles
 }
 
 func oauthVerifier(roles []string) authVerifier {
