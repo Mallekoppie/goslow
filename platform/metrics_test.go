@@ -211,6 +211,53 @@ func httpAuthDecisionCount(t *testing.T, outcome string) float64 {
 	return 0
 }
 
+func TestMetricsRecordCancelledHTTPAuthDecisionsDistinctly(t *testing.T) {
+	enableTestMetrics(t)
+
+	cfg, err := GetPlatformConfiguration()
+	if err != nil {
+		t.Fatalf("GetPlatformConfiguration failed: %v", err)
+	}
+	cfg.Auth.Server.OAuth.Enabled = true
+	cfg.Auth.Server.OAuth.IdpWellKnownURL = "https://idp.example/.well-known/openid-configuration"
+	cfg.Auth.Server.OAuth.ClientID = "test-client"
+	cfg.Auth.Server.OAuth.RolesClaim = "roles"
+	if err := SetPlatformConfiguration(*cfg); err != nil {
+		t.Fatalf("SetPlatformConfiguration failed: %v", err)
+	}
+	stubOIDCVerifier(t, nil, context.Canceled)
+
+	router, err := newRouter(Routes{{
+		Path:   "/secure",
+		Method: http.MethodGet,
+		Auth:   AuthOAuth,
+		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		},
+	}})
+	if err != nil {
+		t.Fatalf("newRouter failed: %v", err)
+	}
+
+	cancelledBefore := httpAuthDecisionCount(t, "cancelled")
+	deniedBefore := httpAuthDecisionCount(t, "denied")
+
+	request := httptest.NewRequest(http.MethodGet, "/secure", nil)
+	request.Header.Set("Authorization", "Bearer token-value")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != 499 {
+		t.Fatalf("expected a cancelled request to be reported as 499, got %d", response.Code)
+	}
+
+	if got := httpAuthDecisionCount(t, "cancelled"); got != cancelledBefore+1 {
+		t.Fatalf("expected one cancelled auth decision, got %v (before %v)", got, cancelledBefore)
+	}
+	if got := httpAuthDecisionCount(t, "denied"); got != deniedBefore {
+		t.Fatalf("a cancelled request must not be counted as denied, got %v (before %v)", got, deniedBefore)
+	}
+}
+
 func TestMetricsRecordHTTPAuthDecisions(t *testing.T) {
 	enableTestMetrics(t)
 

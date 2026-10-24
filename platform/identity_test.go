@@ -518,6 +518,70 @@ func TestAuthorizeLocalOrOIDCFallsThroughWithoutMergingIdentities(t *testing.T) 
 	}
 }
 
+func TestAuthorizeIDTokenReportsCancellationBeforeVerification(t *testing.T) {
+	settings := AuthSettings{OAuth: OAuthSettings{Enabled: true}}
+	verifierCalls := 0
+	authorizer := mustAuthorizer(t, settings, WithIDTokenVerifierFactory(
+		func(context.Context) (IDTokenVerifier, error) {
+			verifierCalls++
+			return recordingIDTokenVerifier{claims: map[string]interface{}{"roles": []interface{}{"admin"}}}, nil
+		},
+	))
+	rule := mustRule(t, authorizer, AuthOAuth, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := authorizer.Authorize(ctx, rule, BearerCredential("token")); !errors.Is(err, ErrCancelled) {
+		t.Fatalf("expected ErrCancelled, got %v", err)
+	}
+	if verifierCalls != 0 {
+		t.Fatalf("a cancelled request must not build or call a verifier, ran %d times", verifierCalls)
+	}
+}
+
+func TestAuthorizeLocalOrOIDCReportsCancellationDuringVerification(t *testing.T) {
+	settings := AuthSettings{
+		LocalJWT: localJWTSettings(),
+		OAuth:    OAuthSettings{Enabled: true, RolesClaim: "roles"},
+	}
+
+	started := make(chan struct{})
+	authorizer := mustAuthorizer(t, settings, WithIDTokenVerifierFactory(
+		func(context.Context) (IDTokenVerifier, error) {
+			return idTokenVerifierFunc(func(ctx context.Context, _ string) (map[string]interface{}, error) {
+				close(started)
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}), nil
+		},
+	))
+	rule := mustRule(t, authorizer, AuthLocalOrOIDC, []string{"admin"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := authorizer.Authorize(ctx, rule, BearerCredential("opaque-token"))
+		result <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("token verification did not start")
+	}
+	cancel()
+
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrCancelled) {
+			t.Fatalf("expected ErrCancelled, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancellation did not stop verification")
+	}
+}
+
 func TestAuthorizeLocalOrOIDCReportsTheAgreedFailureCategory(t *testing.T) {
 	settings := AuthSettings{
 		LocalJWT: localJWTSettings(),

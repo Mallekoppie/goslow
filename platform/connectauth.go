@@ -140,6 +140,10 @@ func (i *connectAuthInterceptor) authorize(ctx context.Context, procedure string
 
 	authorizedContext, err := i.authorizer.Authorize(ctx, rule, credentialFromHeader(header))
 	if err != nil {
+		if errors.Is(err, ErrCancelled) {
+			recordAuthDecision(rpcTransport(header), "cancelled")
+			return ctx, connectAuthorizationError(err)
+		}
 		recordAuthDecision(rpcTransport(header), "denied")
 		return ctx, connectAuthorizationError(err)
 	}
@@ -163,6 +167,8 @@ func credentialFromHeader(header http.Header) Credential {
 // provider is retryable; everything else requires authentication.
 func connectAuthorizationError(err error) error {
 	switch {
+	case errors.Is(err, ErrCancelled):
+		return connect.NewError(connect.CodeCanceled, errors.New("request cancelled"))
 	case errors.Is(err, ErrForbidden):
 		return connect.NewError(connect.CodePermissionDenied, errors.New("forbidden"))
 	case errors.Is(err, ErrUnavailable):
