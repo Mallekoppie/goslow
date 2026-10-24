@@ -345,19 +345,40 @@ func localJWTVerifier() authVerifier {
 	}
 }
 
-// oidcClaimsVerifier verifies a raw ID token and returns its claims. It is an
-// interface so tests can inject a verifier without reaching a real IdP.
-type oidcClaimsVerifier interface {
-	Verify(ctx context.Context, rawToken string) (map[string]interface{}, error)
-}
+// idTokenAudiencePolicy states whether an ID token must be issued to this
+// service's configured client.
+type idTokenAudiencePolicy uint8
+
+const (
+	// requireConfiguredClientID is used for route authorization: the token
+	// proves this service's own caller, so its audience must include the
+	// configured client ID.
+	requireConfiguredClientID idTokenAudiencePolicy = iota
+
+	// acceptAnyAudience is used only for forwarded client tokens. The token was
+	// minted for another client and is forwarded as evidence about that client,
+	// so requiring this service's client ID would reject every valid token.
+	// Signature, expiry, and issuer are still checked.
+	acceptAnyAudience
+)
 
 type idTokenClaimsVerifier struct {
 	verifier *oidc.IDTokenVerifier
 }
 
 func (v idTokenClaimsVerifier) Verify(ctx context.Context, rawToken string) (map[string]interface{}, error) {
+	// go-oidc checks the context while waiting for a key fetch, but a valid
+	// cached key would otherwise verify after the caller has gone away.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	idToken, err := v.verifier.Verify(ctx, rawToken)
 	if err != nil {
+		// A cancelled request is not an identity-provider outage.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, classifyIDTokenVerificationError(err)
 	}
 
@@ -385,7 +406,11 @@ var (
 	oidcProviderCache     = make(map[string]*oidc.Provider)
 )
 
-func defaultOIDCClaimsVerifier(ctx context.Context, conf *Config) (oidcClaimsVerifier, error) {
+// defaultOIDCClaimsVerifier builds the one ID-token verifier used by route
+// authorization and by forwarded client-token validation. The two callers
+// differ only in their audience policy: routes require the configured client
+// ID; forwarded client tokens accept any audience.
+func defaultOIDCClaimsVerifier(ctx context.Context, conf *Config, policy idTokenAudiencePolicy) (IDTokenVerifier, error) {
 	if conf == nil {
 		return nil, errors.New("nil platform configuration")
 	}
@@ -399,10 +424,15 @@ func defaultOIDCClaimsVerifier(ctx context.Context, conf *Config) (oidcClaimsVer
 	}
 
 	config := &oidc.Config{ClientID: conf.Auth.Server.OAuth.ClientID}
+	if policy == acceptAnyAudience {
+		config.SkipClientIDCheck = true
+	}
 	if len(conf.Auth.Server.OAuth.AllowedAlgorithms) > 0 {
 		config.SupportedSigningAlgs = normalizeAlgorithms(conf.Auth.Server.OAuth.AllowedAlgorithms)
 	}
 
+	// provider.Verifier reuses one RemoteKeySet for the cached provider, which
+	// refreshes its keys when a token presents an unknown key ID.
 	return idTokenClaimsVerifier{verifier: provider.Verifier(config)}, nil
 }
 
@@ -454,7 +484,7 @@ func oauthVerifier(roles []string) authVerifier {
 		}
 
 		verifierFactory := newOIDCClaimsVerifier
-		verifier, err := verifierFactory(r.Context(), conf)
+		verifier, err := verifierFactory(r.Context(), conf, requireConfiguredClientID)
 		if err != nil {
 			if Log != nil {
 				Log.Error("Error communicating with IDP provider", zap.Error(err), zap.String("provider_url", conf.Auth.Server.OAuth.IdpWellKnownURL))

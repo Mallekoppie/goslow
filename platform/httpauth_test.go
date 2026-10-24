@@ -329,7 +329,7 @@ func TestHTTPPublicRoutePerformsNoCredentialWork(t *testing.T) {
 	verifierCalls := 0
 	original := newOIDCClaimsVerifier
 	t.Cleanup(func() { newOIDCClaimsVerifier = original })
-	newOIDCClaimsVerifier = func(context.Context, *Config) (oidcClaimsVerifier, error) {
+	newOIDCClaimsVerifier = func(context.Context, *Config, idTokenAudiencePolicy) (IDTokenVerifier, error) {
 		verifierCalls++
 		return idTokenVerifierFunc(func(context.Context, string) (map[string]interface{}, error) {
 			t.Fatal("a public route must not verify credentials")

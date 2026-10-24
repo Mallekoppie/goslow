@@ -24,11 +24,11 @@ func (f fakeClaimsVerifier) Verify(ctx context.Context, rawToken string) (map[st
 	return f.claims, nil
 }
 
-func stubOIDCVerifier(t *testing.T, verifier oidcClaimsVerifier, err error) {
+func stubOIDCVerifier(t *testing.T, verifier IDTokenVerifier, err error) {
 	t.Helper()
 	original := newOIDCClaimsVerifier
 	t.Cleanup(func() { newOIDCClaimsVerifier = original })
-	newOIDCClaimsVerifier = func(ctx context.Context, conf *Config) (oidcClaimsVerifier, error) {
+	newOIDCClaimsVerifier = func(ctx context.Context, conf *Config, policy idTokenAudiencePolicy) (IDTokenVerifier, error) {
 		if err != nil {
 			return nil, err
 		}
@@ -258,7 +258,7 @@ func TestLocalOrOIDCAcceptsEitherToken(t *testing.T) {
 	var oauthAvailable bool
 	original := newOIDCClaimsVerifier
 	t.Cleanup(func() { newOIDCClaimsVerifier = original })
-	newOIDCClaimsVerifier = func(ctx context.Context, conf *Config) (oidcClaimsVerifier, error) {
+	newOIDCClaimsVerifier = func(ctx context.Context, conf *Config, policy idTokenAudiencePolicy) (IDTokenVerifier, error) {
 		if !oauthAvailable {
 			return fakeClaimsVerifier{err: errors.New("idp down")}, nil
 		}

@@ -15,7 +15,7 @@ func newAuthorizerFromConfig(conf *Config) (*Authorizer, error) {
 	verifierConfig := oauthOnlyConfigSnapshot(conf)
 	return NewAuthorizer(AuthSettingsFromConfig(conf), WithIDTokenVerifierFactory(
 		func(ctx context.Context) (IDTokenVerifier, error) {
-			verifier, err := newOIDCClaimsVerifier(ctx, verifierConfig)
+			verifier, err := newOIDCClaimsVerifier(ctx, verifierConfig, requireConfiguredClientID)
 			if err != nil {
 				return nil, err
 			}

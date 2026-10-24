@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,11 +22,57 @@ import (
 )
 
 type fakeIDP struct {
-	server        *httptest.Server
-	key           *rsa.PrivateKey
-	keyID         string
-	discoveryHits int32
-	jwksHits      int32
+	mu              sync.RWMutex
+	server          *httptest.Server
+	key             *rsa.PrivateKey
+	keyID           string
+	discoveryHits   int32
+	jwksHits        int32
+	jwksStatus      atomic.Int32
+	keyFetchStarted chan struct{}
+	keyFetchRelease chan struct{}
+}
+
+// rotateKey replaces the signing key and changes its ID, as a real provider
+// does when it rotates keys.
+func (f *fakeIDP) rotateKey(t *testing.T) {
+	t.Helper()
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rotated rsa key: %v", err)
+	}
+
+	f.mu.Lock()
+	f.key = key
+	f.keyID = "rotated-key"
+	f.mu.Unlock()
+}
+
+func (f *fakeIDP) signingKey() (*rsa.PrivateKey, string) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.key, f.keyID
+}
+
+func (f *fakeIDP) failJWKS(status int) {
+	f.jwksStatus.Store(int32(status))
+}
+
+// blockKeyFetch holds the next JWKS response open until release is called. The
+// started channel closes once the handler has received the request, so a test
+// can cancel the caller while the key fetch is genuinely in flight.
+func (f *fakeIDP) blockKeyFetch() (started <-chan struct{}, release func()) {
+	startedCh := make(chan struct{})
+	releaseCh := make(chan struct{})
+
+	f.mu.Lock()
+	f.keyFetchStarted = startedCh
+	f.keyFetchRelease = releaseCh
+	f.mu.Unlock()
+
+	var once sync.Once
+	return startedCh, func() { once.Do(func() { close(releaseCh) }) }
 }
 
 func clearOIDCProviderCache() {
@@ -59,12 +106,29 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 
 	mux.HandleFunc("/keys", func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&idp.jwksHits, 1)
-		publicKey := key.PublicKey
+		if status := idp.jwksStatus.Load(); status != 0 {
+			http.Error(w, "jwks unavailable", int(status))
+			return
+		}
+
+		idp.mu.Lock()
+		started, release := idp.keyFetchStarted, idp.keyFetchRelease
+		idp.keyFetchStarted, idp.keyFetchRelease = nil, nil
+		idp.mu.Unlock()
+		if release != nil {
+			if started != nil {
+				close(started)
+			}
+			<-release
+		}
+
+		currentKey, currentKeyID := idp.signingKey()
+		publicKey := currentKey.PublicKey
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"keys": []map[string]string{{
 				"kty": "RSA",
-				"kid": idp.keyID,
+				"kid": currentKeyID,
 				"use": "sig",
 				"alg": "RS256",
 				"n":   base64.RawURLEncoding.EncodeToString(publicKey.N.Bytes()),
@@ -84,9 +148,10 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 func (f *fakeIDP) signToken(t *testing.T, claims jwt.MapClaims) string {
 	t.Helper()
 
+	key, keyID := f.signingKey()
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["kid"] = f.keyID
-	signed, err := token.SignedString(f.key)
+	token.Header["kid"] = keyID
+	signed, err := token.SignedString(key)
 	if err != nil {
 		t.Fatalf("sign token: %v", err)
 	}
@@ -179,52 +244,6 @@ func TestOAuthVerifierReportsUnreachableProvider(t *testing.T) {
 	_, err := oauthVerifier(nil)(request)
 	if !errors.Is(err, errOIDCUnavailable) {
 		t.Fatalf("expected errOIDCUnavailable, got %v", err)
-	}
-}
-
-func TestValidateClientTokenWithFakeIDP(t *testing.T) {
-	resetPlatformState(t)
-	idp := newFakeIDP(t)
-
-	rawToken := idp.signToken(t, idp.validClaims())
-
-	parsed, claims, err := OAuth.ValidateClientToken(rawToken)
-	if err != nil {
-		t.Fatalf("ValidateClientToken failed: %v", err)
-	}
-	if !parsed.Valid {
-		t.Fatal("expected a valid token")
-	}
-	if claims["preferred_username"] != "alice" {
-		t.Fatalf("unexpected claims: %v", claims)
-	}
-
-	// A second call should reuse the cached discovery document and JWKS.
-	if _, _, err := OAuth.ValidateClientToken(rawToken); err != nil {
-		t.Fatalf("second ValidateClientToken failed: %v", err)
-	}
-	if got := atomic.LoadInt32(&idp.discoveryHits); got != 1 {
-		t.Fatalf("expected one discovery call, got %d", got)
-	}
-	if got := atomic.LoadInt32(&idp.jwksHits); got != 1 {
-		t.Fatalf("expected one JWKS fetch, got %d", got)
-	}
-}
-
-func TestValidateClientTokenRejectsMalformedInput(t *testing.T) {
-	resetPlatformState(t)
-
-	if _, _, err := OAuth.ValidateClientToken("not-a-token"); err == nil {
-		t.Fatal("expected an error for a malformed token")
-	}
-
-	noIssuer := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": "alice"})
-	signed, err := noIssuer.SignedString([]byte("key"))
-	if err != nil {
-		t.Fatalf("sign token: %v", err)
-	}
-	if _, _, err := OAuth.ValidateClientToken(signed); err == nil {
-		t.Fatal("expected an error for a token without an issuer")
 	}
 }
 

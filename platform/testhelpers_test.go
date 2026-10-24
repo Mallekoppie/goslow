@@ -38,8 +38,6 @@ func resetPlatformState(t *testing.T) {
 	oAuthClientTokenConfiguration = nil
 	oAuthStateLock.Unlock()
 
-	issuerJwkUrlMap = nil
-
 	vaultClientList = nil
 	vaultEnabled = false
 	vaultInitialized = false

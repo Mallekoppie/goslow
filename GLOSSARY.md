@@ -13,7 +13,7 @@ The proof a caller presents to establish an identity: a bearer token or a basic 
 _Avoid_: auth header, token
 
 **Client token**:
-The raw bearer token presented by a caller, retained only so it can be forwarded to an upstream service. It is not an identity.
+The raw bearer token presented by a caller, retained only so it can be forwarded to an upstream service. It is not an identity. When forwarded, it is verified with the same key set and issuer as an ID token but without the audience check, because it was minted for a different client.
 _Avoid_: access token, JWT
 
 ## Surfaces
