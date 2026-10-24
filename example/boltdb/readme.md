@@ -24,20 +24,6 @@ go run main.go
 
 The example uses programmatic configuration (no config.yml file required), demonstrating the new pattern where platform configuration is done in code.
 
-### Using Configuration File (Alternative)
-
-If you prefer to use a config file, the example includes a `config.yml` file. To use it, you would need to call:
-
-```go
-platform.InitializePlatformConfiguration()
-```
-
-instead of:
-
-```go
-platform.SetPlatformConfiguration(config)
-```
-
 ## What the Example Demonstrates
 
 ### 1. Platform Configuration

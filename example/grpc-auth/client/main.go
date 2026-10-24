@@ -18,6 +18,10 @@ import (
 )
 
 func main() {
+	if err := platform.InitializeLogger(); err != nil {
+		log.Fatalf("failed to initialize logger: %v", err)
+	}
+
 	certBytes, err := os.ReadFile("server.crt")
 	if err != nil {
 		log.Fatalf("failed to read server certificate: %v", err)
