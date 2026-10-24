@@ -4,13 +4,24 @@
 
 **Blocked by:** 02: Authorize HTTP routes through the identity authorizer
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Connect, gRPC, and gRPC-Web unary procedures authorize through the authorizer; streaming handler procedures do too.
-- [ ] No fabricated HTTP request is used for authentication.
-- [ ] Procedure roles come from the configured roles claim with any-of matching; a caller lacking one receives `CodePermissionDenied`.
-- [ ] A missing or invalid credential returns `CodeUnauthenticated`; an identity-provider outage with no definite rejection returns `CodeUnavailable`.
-- [ ] A basic strategy for RPC fails at handler construction; a procedure on the unauthenticated exclusion list is public.
-- [ ] The combined application builds one authorizer shared by the HTTP and RPC adapters, with one provider cache.
-- [ ] Auth failures still carry the request ID and are logged once without token values.
-- [ ] Protocol tests for Connect, gRPC, gRPC-Web, and streaming pass.
+- [x] Connect, gRPC, and gRPC-Web unary procedures authorize through the authorizer; streaming handler procedures do too.
+- [x] No fabricated HTTP request is used for authentication.
+- [x] Procedure roles come from the configured roles claim with any-of matching; a caller lacking one receives `CodePermissionDenied`.
+- [x] A missing or invalid credential returns `CodeUnauthenticated`; an identity-provider outage with no definite rejection returns `CodeUnavailable`.
+- [x] A basic strategy for RPC fails at handler construction; a procedure on the unauthenticated exclusion list is public.
+- [x] The combined application builds one authorizer shared by the HTTP and RPC adapters, with one provider cache.
+- [x] Auth failures still carry the request ID and are logged once without token values.
+- [x] Protocol tests for Connect, gRPC, gRPC-Web, and streaming pass.
+
+## Comments
+
+Completed in `cd7b403`. The RPC interceptor in `platform/connectauth.go` now
+resolves per-procedure rules against one authorizer and extracts credentials
+directly from headers; `NewApplicationHandler` builds that authorizer once and
+passes it to both adapters. Covered by `platform/connectauth_identity_test.go`
+for all three protocols, streaming, role/claim matching, error precedence,
+construction-time failures, logging, and the combined application. Verified
+with `go test ./...`, `go test -race ./platform`, `go vet ./...`, `gofmt -l .`,
+and `make build-examples`.
