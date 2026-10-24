@@ -181,7 +181,7 @@ func TestOIDCClaimsVerifierAgainstRealOIDCDiscovery(t *testing.T) {
 	cfg.Auth.Server.OAuth.RolesClaim = "roles"
 	SetPlatformConfiguration(*cfg)
 
-	verifier, err := newOIDCClaimsVerifier(context.Background(), cfg, requireConfiguredClientID)
+	verifier, err := newOIDCClaimsVerifier(context.Background(), AuthSettingsFromConfig(cfg).OAuth, requireConfiguredClientID)
 	if err != nil {
 		t.Fatalf("newOIDCClaimsVerifier failed: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestOIDCClaimsVerifierRejectsWrongAudienceAndExpiredTokens(t *testing.T) {
 	cfg.Auth.Server.OAuth.ClientID = "test-client"
 	SetPlatformConfiguration(*cfg)
 
-	verifier, err := newOIDCClaimsVerifier(context.Background(), cfg, requireConfiguredClientID)
+	verifier, err := newOIDCClaimsVerifier(context.Background(), AuthSettingsFromConfig(cfg).OAuth, requireConfiguredClientID)
 	if err != nil {
 		t.Fatalf("newOIDCClaimsVerifier failed: %v", err)
 	}

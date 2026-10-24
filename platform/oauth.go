@@ -363,11 +363,12 @@ func (o oAuthOrganiser) ValidateClientToken(ctx context.Context, rawToken string
 	if err != nil {
 		return nil, err
 	}
-	if conf.Auth.Server.OAuth.IdpWellKnownURL == "" {
+	settings := AuthSettingsFromConfig(conf).OAuth
+	if settings.IdpWellKnownURL == "" {
 		return nil, errors.New("client token verification requires oauth.idpwellknownurl")
 	}
 
-	verifier, err := newOIDCClaimsVerifier(ctx, oauthOnlyConfigSnapshot(conf), acceptAnyAudience)
+	verifier, err := newOIDCClaimsVerifier(ctx, settings, acceptAnyAudience)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr

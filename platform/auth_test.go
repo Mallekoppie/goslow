@@ -28,7 +28,7 @@ func stubOIDCVerifier(t *testing.T, verifier IDTokenVerifier, err error) {
 	t.Helper()
 	original := newOIDCClaimsVerifier
 	t.Cleanup(func() { newOIDCClaimsVerifier = original })
-	newOIDCClaimsVerifier = func(ctx context.Context, conf *Config, policy idTokenAudiencePolicy) (IDTokenVerifier, error) {
+	newOIDCClaimsVerifier = func(ctx context.Context, settings OAuthSettings, policy idTokenAudiencePolicy) (IDTokenVerifier, error) {
 		if err != nil {
 			return nil, err
 		}
@@ -194,7 +194,7 @@ func TestLocalOrOIDCAcceptsEitherToken(t *testing.T) {
 	var oauthAvailable bool
 	original := newOIDCClaimsVerifier
 	t.Cleanup(func() { newOIDCClaimsVerifier = original })
-	newOIDCClaimsVerifier = func(ctx context.Context, conf *Config, policy idTokenAudiencePolicy) (IDTokenVerifier, error) {
+	newOIDCClaimsVerifier = func(ctx context.Context, settings OAuthSettings, policy idTokenAudiencePolicy) (IDTokenVerifier, error) {
 		if !oauthAvailable {
 			return fakeClaimsVerifier{err: errors.New("idp down")}, nil
 		}

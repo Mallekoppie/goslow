@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -19,6 +20,31 @@ func signLocalJWT(t *testing.T, key string, method jwt.SigningMethod, claims map
 		t.Fatalf("unable to sign local JWT: %v", err)
 	}
 	return signed
+}
+
+func TestAuthorizationOutcomeClassifiesEveryFailureCategory(t *testing.T) {
+	testCases := []struct {
+		name string
+		err  error
+		want AuthOutcome
+	}{
+		{name: "authentication required", err: ErrAuthenticationRequired, want: AuthOutcomeAuthenticationRequired},
+		{name: "wrapped authentication required", err: fmt.Errorf("local jwt: %w", ErrAuthenticationRequired), want: AuthOutcomeAuthenticationRequired},
+		{name: "forbidden", err: ErrForbidden, want: AuthOutcomeForbidden},
+		{name: "wrapped forbidden", err: fmt.Errorf("required roles: %w", ErrForbidden), want: AuthOutcomeForbidden},
+		{name: "unavailable", err: ErrUnavailable, want: AuthOutcomeUnavailable},
+		{name: "wrapped unavailable", err: fmt.Errorf("provider: %w", ErrUnavailable), want: AuthOutcomeUnavailable},
+		{name: "unclassified failure", err: errors.New("boom"), want: AuthOutcomeAuthenticationRequired},
+		{name: "no failure", err: nil, want: AuthOutcomeAuthenticationRequired},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := AuthorizationOutcome(testCase.err); got != testCase.want {
+				t.Fatalf("expected outcome %v, got %v", testCase.want, got)
+			}
+		})
+	}
 }
 
 func localJWTSettings() LocalJWTSettings {
@@ -646,6 +672,9 @@ func TestAuthSettingsFromConfigCopiesTheAuthSettings(t *testing.T) {
 	cfg.Auth.Server.LocalJwt.JwtSigningMethod = "HS512"
 	cfg.Auth.Server.LocalJwt.RolesClaim = "permissions"
 	cfg.Auth.Server.OAuth.Enabled = true
+	cfg.Auth.Server.OAuth.IdpWellKnownURL = "https://idp.example/.well-known/openid-configuration"
+	cfg.Auth.Server.OAuth.ClientID = "test-client"
+	cfg.Auth.Server.OAuth.AllowedAlgorithms = []string{"RS256"}
 	cfg.Auth.Server.OAuth.RolesClaim = "groups"
 	cfg.Auth.Server.Basic.Enabled = true
 	cfg.Auth.Server.Basic.AllowedUsers = map[string]string{"alice": "hash"}
@@ -655,7 +684,14 @@ func TestAuthSettingsFromConfigCopiesTheAuthSettings(t *testing.T) {
 	if settings.LocalJWT != (LocalJWTSettings{Enabled: true, SigningKey: "key", SigningMethod: "HS512", RolesClaim: "permissions"}) {
 		t.Fatalf("unexpected local JWT settings: %+v", settings.LocalJWT)
 	}
-	if settings.OAuth != (OAuthSettings{Enabled: true, RolesClaim: "groups"}) {
+	wantOAuth := OAuthSettings{
+		Enabled:           true,
+		IdpWellKnownURL:   "https://idp.example/.well-known/openid-configuration",
+		ClientID:          "test-client",
+		AllowedAlgorithms: []string{"RS256"},
+		RolesClaim:        "groups",
+	}
+	if !reflect.DeepEqual(settings.OAuth, wantOAuth) {
 		t.Fatalf("unexpected OAuth settings: %+v", settings.OAuth)
 	}
 	if !reflect.DeepEqual(settings.Basic.AllowedUsers, map[string]string{"alice": "hash"}) {
@@ -665,6 +701,10 @@ func TestAuthSettingsFromConfigCopiesTheAuthSettings(t *testing.T) {
 	cfg.Auth.Server.Basic.AllowedUsers["alice"] = "mutated"
 	if settings.Basic.AllowedUsers["alice"] != "hash" {
 		t.Fatal("expected the settings snapshot to own its basic users map")
+	}
+	cfg.Auth.Server.OAuth.AllowedAlgorithms[0] = "HS256"
+	if settings.OAuth.AllowedAlgorithms[0] != "RS256" {
+		t.Fatal("expected the settings snapshot to own its allowed algorithms")
 	}
 }
 

@@ -158,14 +158,14 @@ func credentialFromHeader(header http.Header) Credential {
 	return Credential{}
 }
 
-// connectAuthorizationError maps the authorizer's failure categories onto RPC
-// codes. A verified caller lacking a role is forbidden; an unavailable identity
-// provider is retryable; everything else requires authentication.
+// connectAuthorizationError maps the authorizer's transport-neutral outcome
+// onto RPC codes. A verified caller lacking a role is forbidden; an unavailable
+// identity provider is retryable; everything else requires authentication.
 func connectAuthorizationError(err error) error {
-	switch {
-	case errors.Is(err, ErrForbidden):
+	switch AuthorizationOutcome(err) {
+	case AuthOutcomeForbidden:
 		return connect.NewError(connect.CodePermissionDenied, errors.New("forbidden"))
-	case errors.Is(err, ErrUnavailable):
+	case AuthOutcomeUnavailable:
 		return connect.NewError(connect.CodeUnavailable, errors.New("identity provider unavailable"))
 	default:
 		return connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))

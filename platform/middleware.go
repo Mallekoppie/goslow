@@ -212,25 +212,22 @@ var (
 // authorization and by forwarded client-token validation. The two callers
 // differ only in their audience policy: routes require the configured client
 // ID; forwarded client tokens accept any audience.
-func defaultOIDCClaimsVerifier(ctx context.Context, conf *Config, policy idTokenAudiencePolicy) (IDTokenVerifier, error) {
-	if conf == nil {
-		return nil, errors.New("nil platform configuration")
-	}
-	if conf.Auth.Server.OAuth.IdpWellKnownURL == "" {
+func defaultOIDCClaimsVerifier(ctx context.Context, settings OAuthSettings, policy idTokenAudiencePolicy) (IDTokenVerifier, error) {
+	if settings.IdpWellKnownURL == "" {
 		return nil, errors.New("idp well-known url is not configured")
 	}
 
-	provider, err := cachedOIDCProvider(ctx, conf.Auth.Server.OAuth.IdpWellKnownURL)
+	provider, err := cachedOIDCProvider(ctx, settings.IdpWellKnownURL)
 	if err != nil {
 		return nil, err
 	}
 
-	config := &oidc.Config{ClientID: conf.Auth.Server.OAuth.ClientID}
+	config := &oidc.Config{ClientID: settings.ClientID}
 	if policy == acceptAnyAudience {
 		config.SkipClientIDCheck = true
 	}
-	if len(conf.Auth.Server.OAuth.AllowedAlgorithms) > 0 {
-		config.SupportedSigningAlgs = normalizeAlgorithms(conf.Auth.Server.OAuth.AllowedAlgorithms)
+	if len(settings.AllowedAlgorithms) > 0 {
+		config.SupportedSigningAlgs = normalizeAlgorithms(settings.AllowedAlgorithms)
 	}
 
 	// provider.Verifier reuses one RemoteKeySet for the cached provider, which

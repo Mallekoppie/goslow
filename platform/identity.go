@@ -28,6 +28,39 @@ var (
 	ErrCredentialNotApplicable = errors.New("credential not applicable")
 )
 
+// AuthOutcome is the transport-neutral result of a failed authorization. Each
+// adapter maps it to its own status or code, so the failure categories are
+// classified once.
+type AuthOutcome uint8
+
+const (
+	// AuthOutcomeAuthenticationRequired reports a missing or rejected credential.
+	AuthOutcomeAuthenticationRequired AuthOutcome = iota
+	// AuthOutcomeForbidden reports a verified caller that lacks a required role.
+	AuthOutcomeForbidden
+	// AuthOutcomeUnavailable reports that the identity provider could not be
+	// reached and no credential was definitely rejected.
+	AuthOutcomeUnavailable
+)
+
+// AuthorizationOutcome classifies an authorization failure. Any failure that is
+// neither a role denial nor an identity-provider outage is treated as
+// authentication-required, which is the safe default.
+func AuthorizationOutcome(err error) AuthOutcome {
+	switch {
+	case errors.Is(err, ErrForbidden):
+		return AuthOutcomeForbidden
+	case errors.Is(err, ErrUnavailable):
+		return AuthOutcomeUnavailable
+	default:
+		return AuthOutcomeAuthenticationRequired
+	}
+}
+
+// UnavailableRetryAfterSeconds is the delay, in seconds, advertised to clients
+// when the identity provider is unavailable.
+const UnavailableRetryAfterSeconds = 10
+
 // Credential is the transport-neutral proof a caller presents. Adapters extract
 // it from headers; the authorizer never sees a request.
 type Credential struct {
@@ -99,8 +132,11 @@ type LocalJWTSettings struct {
 // OAuthSettings configures ID token verification. The verifier itself is
 // injected through WithIDTokenVerifierFactory.
 type OAuthSettings struct {
-	Enabled    bool
-	RolesClaim string
+	Enabled           bool
+	IdpWellKnownURL   string
+	ClientID          string
+	AllowedAlgorithms []string
+	RolesClaim        string
 }
 
 // BasicSettings configures basic credential verification.
@@ -124,8 +160,11 @@ func AuthSettingsFromConfig(conf *Config) AuthSettings {
 			RolesClaim:    conf.Auth.Server.LocalJwt.RolesClaim,
 		},
 		OAuth: OAuthSettings{
-			Enabled:    conf.Auth.Server.OAuth.Enabled,
-			RolesClaim: conf.Auth.Server.OAuth.RolesClaim,
+			Enabled:           conf.Auth.Server.OAuth.Enabled,
+			IdpWellKnownURL:   conf.Auth.Server.OAuth.IdpWellKnownURL,
+			ClientID:          conf.Auth.Server.OAuth.ClientID,
+			AllowedAlgorithms: slices.Clone(conf.Auth.Server.OAuth.AllowedAlgorithms),
+			RolesClaim:        conf.Auth.Server.OAuth.RolesClaim,
 		},
 		Basic: BasicSettings{
 			Enabled:      conf.Auth.Server.Basic.Enabled,
@@ -189,6 +228,7 @@ func NewAuthorizer(settings AuthSettings, options ...AuthorizerOption) (*Authori
 // clone makes the settings snapshot independent of the caller's maps. Strings
 // and booleans are already copied by value.
 func (s AuthSettings) clone() AuthSettings {
+	s.OAuth.AllowedAlgorithms = slices.Clone(s.OAuth.AllowedAlgorithms)
 	s.Basic.AllowedUsers = maps.Clone(s.Basic.AllowedUsers)
 	return s
 }

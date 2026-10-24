@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -25,7 +26,7 @@ func HelloWorld(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		p.Log.Error("Client token validation failed", zap.Error(err))
 		if errors.Is(err, p.ErrUnavailable) {
-			w.Header().Set("Retry-After", "10")
+			w.Header().Set("Retry-After", strconv.Itoa(p.UnavailableRetryAfterSeconds))
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
