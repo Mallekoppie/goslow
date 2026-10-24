@@ -217,6 +217,7 @@ type Config struct {
 				JwtSigningKey    string
 				JwtSigningMethod string
 				JwtExpiration    int64
+				RolesClaim       string
 			}
 			Basic struct {
 				Enabled      bool
@@ -346,6 +347,9 @@ func applyDefaults(conf *Config) {
 	}
 	if conf.Auth.Server.OAuth.RolesClaim == "" {
 		conf.Auth.Server.OAuth.RolesClaim = "roles"
+	}
+	if conf.Auth.Server.LocalJwt.RolesClaim == "" {
+		conf.Auth.Server.LocalJwt.RolesClaim = "roles"
 	}
 	if conf.Grpc.Server.ReadHeaderTimeoutSeconds <= 0 {
 		conf.Grpc.Server.ReadHeaderTimeoutSeconds = 5

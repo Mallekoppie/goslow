@@ -29,12 +29,13 @@
 
   // Keep module and build caches off the workspace bind mount. Faster
   // `go test -race ./...` and no host filesystem churn.
-  // Claude Code's config lives in a named volume so login, settings, plugins
-  // and session history survive container rebuilds.
+  // Claude Code's config and the GitHub CLI's auth live in named volumes so
+  // login, settings, plugins and session history survive container rebuilds.
   "mounts": [
     "source=goslow-gomod,target=/go/pkg/mod,type=volume",
     "source=goslow-gobuild,target=/home/vscode/.cache/go-build,type=volume",
-    "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume"
+    "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
+    "source=goslow-gh-config,target=/home/vscode/.config/gh,type=volume"
   ],
 
   "containerEnv": {

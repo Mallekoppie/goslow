@@ -93,44 +93,7 @@ func TestLocalJwtConfigErrorPaths(t *testing.T) {
 			if _, err := LocalJwt.NewLocalJwtToken(map[string]interface{}{"sub": "a"}); !errors.Is(err, testCase.want) {
 				t.Fatalf("expected %v, got %v", testCase.want, err)
 			}
-			if _, err := LocalJwt.ValidateLocalJwtToken("token"); !errors.Is(err, testCase.want) {
-				t.Fatalf("expected %v from validation, got %v", testCase.want, err)
-			}
 		})
-	}
-}
-
-func TestValidateLocalJwtTokenRejectsExpiredAndForeignTokens(t *testing.T) {
-	resetPlatformState(t)
-	cfg := createDefaultConfiguration()
-	cfg.Auth.Server.LocalJwt.Enabled = true
-	cfg.Auth.Server.LocalJwt.JwtSigningKey = "unit-test-key"
-	cfg.Auth.Server.LocalJwt.JwtSigningMethod = "HS256"
-	SetPlatformConfiguration(*cfg)
-
-	expired := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": "alice",
-		"exp": time.Now().Add(-time.Hour).Unix(),
-	})
-	expiredToken, err := expired.SignedString([]byte("unit-test-key"))
-	if err != nil {
-		t.Fatalf("sign expired token: %v", err)
-	}
-	if _, err := LocalJwt.ValidateLocalJwtToken(expiredToken); !errors.Is(err, jwt.ErrTokenExpired) {
-		t.Fatalf("expected ErrTokenExpired, got %v", err)
-	}
-
-	foreign := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": "bob"})
-	foreignToken, err := foreign.SignedString([]byte("other-key"))
-	if err != nil {
-		t.Fatalf("sign foreign token: %v", err)
-	}
-	if _, err := LocalJwt.ValidateLocalJwtToken(foreignToken); !errors.Is(err, jwt.ErrSignatureInvalid) {
-		t.Fatalf("expected ErrSignatureInvalid, got %v", err)
-	}
-
-	if _, err := LocalJwt.ValidateLocalJwtToken("not-a-token"); err == nil {
-		t.Fatal("expected an error for a malformed token")
 	}
 }
 

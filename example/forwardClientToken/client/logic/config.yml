@@ -76,8 +76,8 @@ platform:
       token: "s.aRADbzy3XXaH6dEj3hvHC3BN"
     Cert:
       enabled: false
-      CertFile: './client.cer'
-      KeyFile: './client.key'
+      CertFile: ''
+      KeyFile: ''
 
 
 componentconfigexample:

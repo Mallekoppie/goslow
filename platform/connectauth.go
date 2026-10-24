@@ -9,18 +9,23 @@ import (
 	"connectrpc.com/connect"
 )
 
-// connectAuthInterceptor authenticates Connect, gRPC, and gRPC-Web requests
-// using an explicit strategy and enforces per-procedure role requirements.
+// connectAuthInterceptor authorizes Connect, gRPC, and gRPC-Web procedures
+// through the identity authorizer. Procedure rules are resolved once, when the
+// interceptor is built, against the authorizer's settings snapshot.
 type connectAuthInterceptor struct {
+	authorizer     *Authorizer
 	public         publicPathMatcher
-	procedureRoles map[string][]string
-	verifiers      []authVerifier
+	defaultRule    AccessRule
+	procedureRules map[string]AccessRule
 }
 
-// newConnectAuthInterceptor builds the config-driven interceptor. An empty
-// strategy is only allowed when no auth mechanism is enabled; otherwise startup
-// fails closed. AuthNone is the explicit public configuration.
-func newConnectAuthInterceptor(conf *Config) (connect.Interceptor, error) {
+// newConnectAuthInterceptorWithAuthorizer builds the interceptor around a
+// supplied authorizer, or one constructed from conf when none is supplied. The
+// combined application passes the same authorizer to the HTTP and RPC adapters
+// so both share one settings snapshot and provider cache. An empty strategy is
+// only allowed when no auth mechanism is enabled; otherwise startup fails
+// closed. AuthNone is the explicit public configuration.
+func newConnectAuthInterceptorWithAuthorizer(conf *Config, authorizer *Authorizer) (connect.Interceptor, error) {
 	if conf == nil {
 		return nil, errors.New("nil platform configuration")
 	}
@@ -38,41 +43,62 @@ func newConnectAuthInterceptor(conf *Config) (connect.Interceptor, error) {
 		strategy = AuthNone
 	}
 
-	verifiers := make([]authVerifier, 0, 2)
+	if err := validateProcedureRules(conf, public, strategy); err != nil {
+		return nil, err
+	}
+
 	switch strategy {
 	case AuthNone:
 		return nil, nil
-	case AuthLocalJWT:
-		if !conf.Auth.Server.LocalJwt.Enabled {
-			return nil, fmt.Errorf("grpc auth strategy %q requires auth.server.localjwt.enabled", strategy)
-		}
-		verifiers = append(verifiers, localJWTVerifier())
-	case AuthOAuth:
-		if !conf.Auth.Server.OAuth.Enabled {
-			return nil, fmt.Errorf("grpc auth strategy %q requires auth.server.oauth.enabled", strategy)
-		}
-		verifiers = append(verifiers, oauthVerifier(nil))
-	case AuthLocalOrOIDC:
-		if !conf.Auth.Server.LocalJwt.Enabled || !conf.Auth.Server.OAuth.Enabled {
-			return nil, fmt.Errorf("grpc auth strategy %q requires both local jwt and oauth to be enabled", strategy)
-		}
-		verifiers = append(verifiers, localJWTVerifier(), oauthVerifier(nil))
 	case AuthBasic:
 		return nil, fmt.Errorf("basic auth cannot protect gRPC transports; use local-jwt, oauth, or local-or-oidc")
-	default:
-		return nil, fmt.Errorf("unknown grpc auth strategy %q", strategy)
 	}
 
-	procedureRoles := conf.Grpc.Server.ProcedureRoles
-	if procedureRoles == nil {
-		procedureRoles = map[string][]string{}
+	if authorizer == nil {
+		authorizer, err = newAuthorizerFromConfig(conf)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	defaultRule, err := authorizer.ResolveAccessRule(strategy, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	procedureRules := make(map[string]AccessRule, len(conf.Grpc.Server.ProcedureRoles))
+	for procedure, roles := range conf.Grpc.Server.ProcedureRoles {
+		rule, err := authorizer.ResolveAccessRule(strategy, roles)
+		if err != nil {
+			return nil, fmt.Errorf("procedure %s: %w", procedure, err)
+		}
+		procedureRules[procedure] = rule
 	}
 
 	return &connectAuthInterceptor{
+		authorizer:     authorizer,
 		public:         public,
-		procedureRoles: procedureRoles,
-		verifiers:      verifiers,
+		defaultRule:    defaultRule,
+		procedureRules: procedureRules,
 	}, nil
+}
+
+// validateProcedureRules fails closed when required roles cannot be enforced:
+// roles declared on an AuthNone rule, or on a procedure the unauthenticated
+// exclusion list makes public.
+func validateProcedureRules(conf *Config, public publicPathMatcher, strategy AuthStrategy) error {
+	for procedure, roles := range conf.Grpc.Server.ProcedureRoles {
+		if len(roles) == 0 {
+			continue
+		}
+		if public.matches("", procedure) {
+			return fmt.Errorf("procedure %s declares required roles but is also in the unauthenticated exclusion list", procedure)
+		}
+		if strategy == AuthNone {
+			return fmt.Errorf("procedure %s: %w: strategy %q does not support required roles", procedure, ErrInvalidAccessRule, AuthNone)
+		}
+	}
+	return nil
 }
 
 func (i *connectAuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
@@ -100,86 +126,47 @@ func (i *connectAuthInterceptor) WrapStreamingHandler(next connect.StreamingHand
 }
 
 // authorize returns a context enriched with the verified identity, or a connect
-// error mapped from the failure.
+// error mapped from the authorizer's failure category.
 func (i *connectAuthInterceptor) authorize(ctx context.Context, procedure string, header http.Header) (context.Context, error) {
 	if i.public.matches("", procedure) {
 		recordAuthDecision(rpcTransport(header), "anonymous")
-		return context.WithValue(ctx, contextAuthOutcome, "anonymous"), nil
+		return ctx, nil
 	}
 
-	if _, ok := bearerToken(header.Get("Authorization")); !ok {
-		recordAuthDecision(rpcTransport(header), "denied")
-		return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("missing or malformed bearer token"))
+	rule := i.defaultRule
+	if procedureRule, ok := i.procedureRules[procedure]; ok {
+		rule = procedureRule
 	}
 
-	request := (&http.Request{Header: header}).WithContext(ctx)
-
-	var lastErr error
-	for _, verifier := range i.verifiers {
-		result, err := verifier(request)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if err := i.checkRoles(procedure, result); err != nil {
-			recordAuthDecision(rpcTransport(header), "denied")
-			return ctx, err
-		}
-		authorizedContext := applyAuthResult(ctx, result)
-		recordAuthDecision(rpcTransport(header), "allowed")
-		return context.WithValue(authorizedContext, contextAuthOutcome, "allowed"), nil
+	authorizedContext, err := i.authorizer.Authorize(ctx, rule, credentialFromHeader(header))
+	if err != nil {
+		recordAuthorizationFailure(rpcTransport(header), err)
+		return ctx, connectAuthorizationError(err)
 	}
 
-	recordAuthDecision(rpcTransport(header), "denied")
-	if errors.Is(lastErr, errOIDCUnavailable) {
-		return ctx, connect.NewError(connect.CodeUnavailable, errors.New("identity provider unavailable"))
-	}
-	return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid credentials"))
+	recordAuthDecision(rpcTransport(header), "allowed")
+	return authorizedContext, nil
 }
 
-func (i *connectAuthInterceptor) checkRoles(procedure string, result authResult) error {
-	required := i.procedureRoles[procedure]
-	if len(required) == 0 {
-		return nil
-	}
-
-	granted := result.Roles
-	if len(granted) == 0 {
-		granted = rolesFromClaims(result.LocalClaims)
-	}
-
-	for _, needed := range required {
-		for _, held := range granted {
-			if needed == held {
-				return nil
-			}
-		}
-	}
-
-	return connect.NewError(connect.CodePermissionDenied, fmt.Errorf("missing required role for %s", procedure))
+// credentialFromHeader extracts the transport-neutral proof from RPC headers.
+// RPC transports carry bearer tokens only; basic credentials are rejected when
+// the interceptor is constructed.
+func credentialFromHeader(header http.Header) Credential {
+	return credentialFromAuthorizationHeader(header)
 }
 
-// rolesFromClaims extracts roles from local JWT claims.
-func rolesFromClaims(claims map[string]interface{}) []string {
-	if len(claims) == 0 {
-		return nil
+// connectAuthorizationError maps the authorizer's transport-neutral outcome
+// onto RPC codes. A verified caller lacking a role is forbidden; an unavailable
+// identity provider is retryable; everything else requires authentication.
+func connectAuthorizationError(err error) error {
+	switch AuthorizationOutcome(err) {
+	case AuthOutcomeCancelled:
+		return connect.NewError(connect.CodeCanceled, errors.New("request cancelled"))
+	case AuthOutcomeForbidden:
+		return connect.NewError(connect.CodePermissionDenied, errors.New("forbidden"))
+	case AuthOutcomeUnavailable:
+		return connect.NewError(connect.CodeUnavailable, errors.New("identity provider unavailable"))
+	default:
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
 	}
-
-	switch typed := claims["roles"].(type) {
-	case []string:
-		return typed
-	case []interface{}:
-		roles := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if role, ok := item.(string); ok {
-				roles = append(roles, role)
-			}
-		}
-		return roles
-	}
-
-	if role, ok := claims["role"].(string); ok {
-		return []string{role}
-	}
-	return nil
 }

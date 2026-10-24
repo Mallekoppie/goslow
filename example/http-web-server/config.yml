@@ -39,9 +39,12 @@ platform:
   auth:
     server:
       oauth:
-        enabled: false
-        idpwellknownurl: ""
-        clientid: ""
+        enabled: true
+        # Issuer base URL of the identity provider that mints the ID tokens
+        # accepted by the /oauth2 route. The platform appends
+        # /.well-known/openid-configuration; do not include it here.
+        idpwellknownurl: "https://idp.example"
+        clientid: "example-client"
         allowedalgorithms:
         - rs256
         - rs384
@@ -72,8 +75,12 @@ platform:
     boltdb:
       enabled: true
       filename: ./database.db
+  # Vault is disabled because this example does not ship the client
+  # certificate/key pair that cert auth would load. With Vault disabled the
+  # /secrets route returns 500 "vault not enabled". To use it, enable Vault and
+  # supply CertFile/KeyFile (cert auth) or token settings.
   vault:
-    enabled: true
+    enabled: false
     addresslist:
       - 'https://localhost:8200'
     InsecureSkipVerify: true
@@ -88,9 +95,9 @@ platform:
       TokenPath: ''
       token: ""
     Cert:
-      enabled: true
-      CertFile: './client.cer'
-      KeyFile: './client.key'
+      enabled: false
+      CertFile: ''
+      KeyFile: ''
 
 
 componentconfigexample:

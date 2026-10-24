@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	jose "github.com/go-jose/go-jose/v4"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 )
@@ -32,8 +31,6 @@ var (
 	oAuthRenewWG                   sync.WaitGroup
 
 	OAuth oAuthOrganiser
-
-	issuerJwkUrlMap map[string]idpDetailsCacheItem
 )
 
 const (
@@ -42,12 +39,6 @@ const (
 )
 
 type oAuthOrganiser struct{}
-
-type idpDetailsCacheItem struct {
-	JwkUrl       string
-	KeySet       jose.JSONWebKeySet
-	SetPopulated bool
-}
 
 func ensureOAuthHTTPClient() *http.Client {
 	oAuthClientOnce.Do(func() {
@@ -73,7 +64,6 @@ func createInsecureOAuthHTTPClient() *http.Client {
 func initializeOAuthTokenClients(conf *Config) error {
 	stopOAuthTokenRenewal()
 	ensureOAuthHTTPClient()
-	ensureIssuerJwkCache()
 
 	oAuthStateLock.Lock()
 	oAuthTokens = nil
@@ -357,144 +347,36 @@ func internalGetOAuth2Token(id string) (accessToken string, err error) {
 	return oauthResponse.AccessToken, nil
 }
 
-func ensureIssuerJwkCache() {
-	oAuthStateLock.Lock()
-	defer oAuthStateLock.Unlock()
-	if issuerJwkUrlMap == nil {
-		issuerJwkUrlMap = make(map[string]idpDetailsCacheItem)
+// ValidateClientToken verifies a forwarded client token with the same verifier
+// used for route authorization: signature, expiry, and issuer are checked, and
+// provider keys are refreshed when the token presents an unknown key ID.
+//
+// Audience is the one explicit difference. A forwarded client token was minted
+// for a different client, so its audience is not compared with this service's
+// configured client ID. Requiring it would reject every forwarded token.
+func (o oAuthOrganiser) ValidateClientToken(ctx context.Context, rawToken string) (map[string]interface{}, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-}
 
-func (o oAuthOrganiser) ValidateClientToken(rawToken string) (parsedToken *jwt.Token, claims map[string]interface{}, err error) {
-	ensureIssuerJwkCache()
-
-	unverified, _, err := new(jwt.Parser).ParseUnverified(rawToken, jwt.MapClaims{})
+	conf, err := GetPlatformConfiguration()
 	if err != nil {
-		Log.Error("Unable to read client token claims", zap.Error(err))
-		return nil, nil, err
+		return nil, err
+	}
+	settings := AuthSettingsFromConfig(conf).OAuth
+	if settings.IdpWellKnownURL == "" {
+		return nil, errors.New("client token verification requires oauth.idpwellknownurl")
 	}
 
-	mapClaims, ok := unverified.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, nil, errors.New("client token claims have an unexpected type")
-	}
-	claims = mapClaims
-
-	issuer, ok := claims["iss"].(string)
-	if !ok || issuer == "" {
-		return nil, claims, errors.New("client token is missing an issuer claim")
-	}
-
-	oAuthStateLock.RLock()
-	details, cached := issuerJwkUrlMap[issuer]
-	oAuthStateLock.RUnlock()
-
-	if !cached {
-		jwksURL, lookupErr := getJksUrl(issuer)
-		if lookupErr != nil {
-			return nil, claims, lookupErr
+	verifier, err := newOIDCClaimsVerifier(ctx, settings, acceptAnyAudience)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
 		}
-		details = idpDetailsCacheItem{JwkUrl: jwksURL}
+		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 
-	if !details.SetPopulated {
-		set, fetchErr := fetchIssuerKeySet(details.JwkUrl)
-		if fetchErr != nil {
-			Log.Error("Unable to fetch the issuer JWKS", zap.String("jwks_url", details.JwkUrl), zap.Error(fetchErr))
-			return nil, claims, fetchErr
-		}
-		details.KeySet = set
-		details.SetPopulated = true
-	}
-
-	oAuthStateLock.Lock()
-	issuerJwkUrlMap[issuer] = details
-	oAuthStateLock.Unlock()
-
-	parsedToken, err = jwt.Parse(rawToken, func(token *jwt.Token) (interface{}, error) {
-		keyID, ok := token.Header["kid"].(string)
-		if !ok {
-			return nil, errors.New("expecting JWT header to have string kid")
-		}
-
-		if key := details.KeySet.Key(keyID); len(key) == 1 {
-			return key[0].Key, nil
-		}
-
-		return nil, fmt.Errorf("unable to find key %q", keyID)
-	})
-	if err != nil {
-		Log.Error("Token Validation failed", zap.Error(err))
-		return parsedToken, claims, err
-	}
-
-	return parsedToken, claims, nil
-}
-
-// fetchIssuerKeySet downloads and parses an issuer JWKS document. The response
-// body is bounded so an unexpected upstream cannot exhaust memory.
-func fetchIssuerKeySet(jwksURL string) (jose.JSONWebKeySet, error) {
-	var set jose.JSONWebKeySet
-
-	response, err := ensureOAuthHTTPClient().Get(jwksURL)
-	if err != nil {
-		return set, err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return set, fmt.Errorf("issuer JWKS returned status %d", response.StatusCode)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-	if err != nil {
-		return set, err
-	}
-	if err := json.Unmarshal(body, &set); err != nil {
-		return set, fmt.Errorf("unable to decode issuer JWKS: %w", err)
-	}
-	if len(set.Keys) == 0 {
-		return set, errors.New("issuer JWKS contained no keys")
-	}
-
-	return set, nil
-}
-
-func getJksUrl(issuerUrl string) (url string, err error) {
-	wellKnownExtension := "/.well-known/openid-configuration"
-	fullPath := fmt.Sprintf("%s%s", issuerUrl, wellKnownExtension)
-
-	response, err := ensureOAuthHTTPClient().Get(fullPath)
-	if err != nil {
-		Log.Error("Unable to call IDP Well Known configuration endpoint", zap.String("idp_issuer", issuerUrl),
-			zap.Error(err))
-		return "", err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		Log.Error("Incorrect response code from IDP Well Known url", zap.Int("status_code_expected", 200),
-			zap.Int("status_code_actual", response.StatusCode), zap.String("idp_issuer", issuerUrl))
-		return "", errors.New("incorrect response code. expected 200")
-	}
-
-	responseData, err := io.ReadAll(response.Body)
-	if err != nil {
-		Log.Error("Error reading response body from IDP Well Known config", zap.String("idp_issuer", issuerUrl),
-			zap.Error(err))
-		return "", err
-	}
-
-	responseBody := IDPWellKnownConfiguration{}
-
-	err = json.Unmarshal(responseData, &responseBody)
-	if err != nil {
-		Log.Error("Error unmarshalling IDP Well Known response body", zap.String("idp_issuer", issuerUrl),
-			zap.Error(err))
-		return "", err
-	}
-
-	return responseBody.JwksURI, nil
+	return verifier.Verify(ctx, rawToken)
 }
 
 type idpOAuth2TokenResponse struct {
@@ -506,64 +388,4 @@ type idpOAuth2TokenResponse struct {
 	NotBeforePolicy  int    `json:"not-before-policy"`
 	SessionState     string `json:"session_state"`
 	Scope            string `json:"scope"`
-}
-
-type IDPWellKnownConfiguration struct {
-	Issuer                                                    string   `json:"issuer"`
-	AuthorizationEndpoint                                     string   `json:"authorization_endpoint"`
-	TokenEndpoint                                             string   `json:"token_endpoint"`
-	IntrospectionEndpoint                                     string   `json:"introspection_endpoint"`
-	UserinfoEndpoint                                          string   `json:"userinfo_endpoint"`
-	EndSessionEndpoint                                        string   `json:"end_session_endpoint"`
-	JwksURI                                                   string   `json:"jwks_uri"`
-	CheckSessionIframe                                        string   `json:"check_session_iframe"`
-	GrantTypesSupported                                       []string `json:"grant_types_supported"`
-	ResponseTypesSupported                                    []string `json:"response_types_supported"`
-	SubjectTypesSupported                                     []string `json:"subject_types_supported"`
-	IDTokenSigningAlgValuesSupported                          []string `json:"id_token_signing_alg_values_supported"`
-	IDTokenEncryptionAlgValuesSupported                       []string `json:"id_token_encryption_alg_values_supported"`
-	IDTokenEncryptionEncValuesSupported                       []string `json:"id_token_encryption_enc_values_supported"`
-	UserinfoSigningAlgValuesSupported                         []string `json:"userinfo_signing_alg_values_supported"`
-	RequestObjectSigningAlgValuesSupported                    []string `json:"request_object_signing_alg_values_supported"`
-	RequestObjectEncryptionAlgValuesSupported                 []string `json:"request_object_encryption_alg_values_supported"`
-	RequestObjectEncryptionEncValuesSupported                 []string `json:"request_object_encryption_enc_values_supported"`
-	ResponseModesSupported                                    []string `json:"response_modes_supported"`
-	RegistrationEndpoint                                      string   `json:"registration_endpoint"`
-	TokenEndpointAuthMethodsSupported                         []string `json:"token_endpoint_auth_methods_supported"`
-	TokenEndpointAuthSigningAlgValuesSupported                []string `json:"token_endpoint_auth_signing_alg_values_supported"`
-	IntrospectionEndpointAuthMethodsSupported                 []string `json:"introspection_endpoint_auth_methods_supported"`
-	IntrospectionEndpointAuthSigningAlgValuesSupported        []string `json:"introspection_endpoint_auth_signing_alg_values_supported"`
-	AuthorizationSigningAlgValuesSupported                    []string `json:"authorization_signing_alg_values_supported"`
-	AuthorizationEncryptionAlgValuesSupported                 []string `json:"authorization_encryption_alg_values_supported"`
-	AuthorizationEncryptionEncValuesSupported                 []string `json:"authorization_encryption_enc_values_supported"`
-	ClaimsSupported                                           []string `json:"claims_supported"`
-	ClaimTypesSupported                                       []string `json:"claim_types_supported"`
-	ClaimsParameterSupported                                  bool     `json:"claims_parameter_supported"`
-	ScopesSupported                                           []string `json:"scopes_supported"`
-	RequestParameterSupported                                 bool     `json:"request_parameter_supported"`
-	RequestURIParameterSupported                              bool     `json:"request_uri_parameter_supported"`
-	RequireRequestURIRegistration                             bool     `json:"require_request_uri_registration"`
-	CodeChallengeMethodsSupported                             []string `json:"code_challenge_methods_supported"`
-	TLSClientCertificateBoundAccessTokens                     bool     `json:"tls_client_certificate_bound_access_tokens"`
-	RevocationEndpoint                                        string   `json:"revocation_endpoint"`
-	RevocationEndpointAuthMethodsSupported                    []string `json:"revocation_endpoint_auth_methods_supported"`
-	RevocationEndpointAuthSigningAlgValuesSupported           []string `json:"revocation_endpoint_auth_signing_alg_values_supported"`
-	BackchannelLogoutSupported                                bool     `json:"backchannel_logout_supported"`
-	BackchannelLogoutSessionSupported                         bool     `json:"backchannel_logout_session_supported"`
-	DeviceAuthorizationEndpoint                               string   `json:"device_authorization_endpoint"`
-	BackchannelTokenDeliveryModesSupported                    []string `json:"backchannel_token_delivery_modes_supported"`
-	BackchannelAuthenticationEndpoint                         string   `json:"backchannel_authentication_endpoint"`
-	BackchannelAuthenticationRequestSigningAlgValuesSupported []string `json:"backchannel_authentication_request_signing_alg_values_supported"`
-	RequirePushedAuthorizationRequests                        bool     `json:"require_pushed_authorization_requests"`
-	PushedAuthorizationRequestEndpoint                        string   `json:"pushed_authorization_request_endpoint"`
-	MtlsEndpointAliases                                       struct {
-		TokenEndpoint                      string `json:"token_endpoint"`
-		RevocationEndpoint                 string `json:"revocation_endpoint"`
-		IntrospectionEndpoint              string `json:"introspection_endpoint"`
-		DeviceAuthorizationEndpoint        string `json:"device_authorization_endpoint"`
-		RegistrationEndpoint               string `json:"registration_endpoint"`
-		UserinfoEndpoint                   string `json:"userinfo_endpoint"`
-		PushedAuthorizationRequestEndpoint string `json:"pushed_authorization_request_endpoint"`
-		BackchannelAuthenticationEndpoint  string `json:"backchannel_authentication_endpoint"`
-	} `json:"mtls_endpoint_aliases"`
 }

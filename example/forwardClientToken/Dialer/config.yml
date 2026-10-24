@@ -75,9 +75,9 @@ platform:
       TokenPath: ''
       token: ""
     Cert:
-      enabled: true
-      CertFile: './client.cer'
-      KeyFile: './client.key'
+      enabled: false
+      CertFile: ''
+      KeyFile: ''
 
 
 componentconfigexample:

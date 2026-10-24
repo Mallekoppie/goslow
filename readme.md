@@ -27,10 +27,15 @@ The `platform` directory provides shared infrastructure for all services in the 
 - **HTTP Client (`httpclient.go`)**  
   Creates HTTP clients with custom config (TLS, timeouts) from `config.yml`.
 
-- **Authentication (`jwt.go`, `oauth.go`, `middleware.go`)**  
-  - Local JWT: Issue and validate tokens for stateless auth.
-  - OAuth2: Token management, auto-renewal, and validation (with Vault integration for secrets).
-  - Middleware: HTTP middleware and Connect interceptors for OAuth2 and JWT authentication.
+- **Authentication (`identity.go`, `httpauth.go`, `connectauth.go`, `jwt.go`, `oauth.go`)**  
+  One transport-neutral identity module authorizes every surface. Adapters extract a
+  `Credential` from headers, resolve an `AccessRule` once at construction, and call
+  `Authorizer.Authorize`; handlers read the caller with `IdentityFromContext`.  
+  - Local JWT: Issue tokens for stateless auth; verification happens inside the authorizer.
+  - OAuth2: Token management, auto-renewal, and client-token validation (Vault integration for secrets).
+  - Failure mapping: missing or invalid credentials are `401` / `CodeUnauthenticated`;
+    a verified caller lacking a required role is `403` / `CodePermissionDenied`; an
+    identity-provider outage is `503` with `Retry-After` / `CodeUnavailable`.
 
 - **Vault Integration (`vault.go`)**  
   HashiCorp Vault client for secret management.  
@@ -38,13 +43,14 @@ The `platform` directory provides shared infrastructure for all services in the 
 
 - **Utilities**
   - **JSON Marshalling (`marshalling.go`)**: Read/write JSON for HTTP APIs.
-  - **Middleware (`middleware.go`)**: Logging, CORS, content-type, and authentication for HTTP routes.
+  - **Middleware (`middleware.go`)**: Request ID, recovery, logging, and content-type checks for HTTP routes. Authentication is not middleware; it is the identity module above.
 
 ### Usage Patterns
 
 - Always use platform helpers for logging, config, and database access.
 - Configure all platform features in `platform/config.yml`.
-- Extend authentication and middleware via provided interfaces.
+- Extend middleware with the provided helpers.
+- The identity module snapshots the OAuth settings when a router or handler is constructed; it builds the ID-token verifier lazily on each authorization attempt.
 - Place tests for platform features in the same directory (e.g., `boltdb_test.go`, `jwt_test.go`).
 
 ### Example
@@ -77,6 +83,10 @@ Demonstrates how a client token is forwarded and validated across multiple servi
 - Server service validates token and then also validates the original client token
 - Server service can now do authorization based on original client token
 
+Both example routes require the `user` role. See
+`example/forwardClientToken/readme.md` for the Keycloak realm-role claim mapping
+(`realm_access.roles`) needed for a valid token to pass that requirement.
+
 ### gRPC-Compatible Service Setup (grpc-auth, grpc-web-server)
 
 The platform serves RPCs with [Buf Connect](https://connectrpc.com), not grpc-go.
@@ -104,6 +114,15 @@ its migration path here before removing this dependency.
 
 Implements REST endpoints for database operations and configuration queries.
 
+`http-api-server` and `http-web-server` ship a `/secrets` route backed by Vault.
+Their `config.yml` files disable Vault because the examples do not ship the
+`client.cer`/`client.key` pair that cert auth would load. With Vault disabled,
+`/secrets` returns `500` with the body `vault not enabled`; this is the expected
+behaviour for the shipped configuration. To exercise the route, set
+`platform.vault.enabled: true` and either supply `Cert.CertFile`/`Cert.KeyFile`
+for cert auth or enable `Token` auth, pointing the address list at a running
+Vault that holds the `kv-v2/data/dev/test/creds` secret.
+
 **Route Definition Example:**
 ```go
 import (
@@ -118,30 +137,35 @@ var Routes = platform.Routes{
         Method:      http.MethodPost,
         HandlerFunc: service.WriteObject,
         SlaMs:       10,
+        Auth:        platform.AuthNone,
     },
     platform.Route{
         Path:        "/db/read",
         Method:      http.MethodPost,
         HandlerFunc: service.ReadObject,
         SlaMs:       0,
+        Auth:        platform.AuthNone,
     },
     platform.Route{
         Path:        "/",
         Method:      http.MethodGet,
         HandlerFunc: service.HelloWorld,
         SlaMs:       0,
+        Auth:        platform.AuthNone,
     },
     platform.Route{
         Path:        "/config",
         Method:      http.MethodGet,
         HandlerFunc: service.GetConfiguration,
         SlaMs:       0,
+        Auth:        platform.AuthNone,
     },
     platform.Route{
         Path:        "/all",
         Method:      http.MethodGet,
         HandlerFunc: service.ReadAll,
         SlaMs:       0,
+        Auth:        platform.AuthNone,
     },
 }
 ```
@@ -387,6 +411,7 @@ these defaults:
 | `database.boltdb.enabled` | `false` |
 | `database.boltdb.opentimeoutseconds` | `5` |
 | `auth.server.oauth.rolesclaim` | `roles` |
+| `auth.server.localjwt.rolesclaim` | `roles` |
 | `http.server.allowedorigins` | empty (CORS disabled) |
 | `http.server.maxrequestbodybytes` | `1048576` |
 | `grpc.server.auth` | unset (startup error if JWT/OAuth is enabled) |
@@ -424,13 +449,38 @@ An explicit `Route.Auth` is mandatory: a route without one fails router
 construction. Use `Auth: platform.AuthNone` for a deliberately public route.
 A route that requests a disabled strategy also fails at startup.
 
+HTTP routes and Connect procedures share one `Authorizer` and one settings
+snapshot (the combined application builds it once). Handlers never read auth
+state from individual context keys: they call `platform.IdentityFromContext`:
+
+```go
+identity, ok := platform.IdentityFromContext(r.Context())
+if !ok {
+    // public route or a programming error in a protected route
+}
+```
+
+Protection failures map consistently on every transport:
+
+| Outcome | HTTP | Connect / gRPC |
+| --- | --- | --- |
+| Missing or invalid credential | `401 Unauthorized` | `CodeUnauthenticated` |
+| Verified caller lacking a required role | `403 Forbidden` | `CodePermissionDenied` |
+| Identity provider unavailable, no definite rejection | `503` + `Retry-After` | `CodeUnavailable` |
+| Request cancelled before verification completed | `499` | `CodeCanceled` |
+
+A cancelled request is not a rejection or a role denial; the caller went away before
+verification could establish or reject an identity. Adapters report it distinctly.
+
 An OAuth route with no `RolesRequired` only verifies the token. If the identity provider
 cannot be reached at request time the route returns `503 Service Unavailable` with a
 `Retry-After` header instead of panicking, and other routes keep serving.
 
-Roles are read from `auth.server.oauth.rolesclaim`. The literal claim key is tried first
-(handy for Zitadel URNs), then a dotted path such as `realm_access.roles`. The claim may
-be a list of strings or an object whose keys are the roles.
+OAuth roles are read from `auth.server.oauth.rolesclaim`; local JWT roles from
+`auth.server.localjwt.rolesclaim`, falling back to the singular `role` claim when the
+configured claim is absent. The literal claim key is tried first (handy for Zitadel
+URNs), then a dotted path such as `realm_access.roles`. The claim may be a list of
+strings or an object whose keys are the roles.
 
 ### Unauthenticated Exclusion List
 
@@ -509,7 +559,7 @@ scrape_configs:
 
 Exported families: `goslow_http_requests_total`, `goslow_http_request_duration_seconds`,
 `goslow_rpc_requests_total`, `goslow_rpc_request_duration_seconds`,
-`goslow_auth_decisions_total` (`allowed`/`denied`/`anonymous`), and
+`goslow_auth_decisions_total` (`allowed`/`denied`/`cancelled`/`anonymous`), and
 `goslow_inflight_requests`. Labels use registered routes and procedure names only;
 tokens, headers, and bodies are never recorded. The listener starts and stops with
 the server context.
@@ -597,7 +647,8 @@ if conf.Database.BoltDB.Enabled {
 Every router built by the platform includes:
 
 - **Request ID** – reuses an incoming `X-Request-ID` or generates one, returns it on the
-  response, and stores it in the request context (`platform.ContextRequestID`).
+  response, and stores it in the request context (`platform.RequestIDFromContext`). It is
+  populated for public and authenticated requests on both HTTP and RPC surfaces.
 - **Recovery** – converts a handler panic into a JSON `500` that carries the request id.
 - **Access logging** – logs method, path, status, duration, and request id; SLA breaches
   are logged as warnings.

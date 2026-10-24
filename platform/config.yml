@@ -134,5 +134,5 @@ platform:
       token: "REPLACE_WITH_VAULT_TOKEN"
     Cert:
       enabled: false
-      CertFile: './client.cer'
-      KeyFile: './client.key'
+      CertFile: ''
+      KeyFile: ''

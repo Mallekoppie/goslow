@@ -2,11 +2,10 @@ package platform
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 )
 
-// AuthStrategy enumerates supported auth modes for a route.
+// AuthStrategy enumerates supported auth strategies for a route.
 type AuthStrategy string
 
 const (
@@ -89,45 +88,4 @@ func publicPaths(conf *Config) (publicPathMatcher, error) {
 
 func (a AuthStrategy) Enabled() bool {
 	return a != "" && a != AuthNone
-}
-
-// routeAuthStrategies resolves the strategies for a route. An explicit Route.Auth
-// is mandatory; there is no inference from enabled server strategies.
-func routeAuthStrategies(route Route) ([]AuthStrategy, error) {
-	if route.Auth == "" {
-		return nil, ErrRouteAuthStrategyRequired
-	}
-
-	switch route.Auth {
-	case AuthNone:
-		return nil, nil
-	case AuthLocalJWT, AuthOAuth, AuthBasic:
-		return []AuthStrategy{route.Auth}, nil
-	case AuthLocalOrOIDC:
-		return []AuthStrategy{AuthLocalJWT, AuthOAuth}, nil
-	default:
-		return nil, fmt.Errorf("unknown auth strategy %q", route.Auth)
-	}
-}
-
-func authStrategyVerifier(conf *Config, strategy AuthStrategy, roles []string) (authVerifier, error) {
-	switch strategy {
-	case AuthBasic:
-		if !conf.Auth.Server.Basic.Enabled {
-			return nil, fmt.Errorf("auth strategy %q requested but basic auth is not enabled", strategy)
-		}
-		return basicAuthVerifier(conf.Auth.Server.Basic.AllowedUsers), nil
-	case AuthOAuth:
-		if !conf.Auth.Server.OAuth.Enabled {
-			return nil, fmt.Errorf("auth strategy %q requested but oauth is not enabled", strategy)
-		}
-		return oauthVerifier(roles), nil
-	case AuthLocalJWT:
-		if !conf.Auth.Server.LocalJwt.Enabled {
-			return nil, fmt.Errorf("auth strategy %q requested but local jwt is not enabled", strategy)
-		}
-		return localJWTVerifier(), nil
-	default:
-		return nil, fmt.Errorf("unknown auth strategy %q", strategy)
-	}
 }

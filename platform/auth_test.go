@@ -24,11 +24,11 @@ func (f fakeClaimsVerifier) Verify(ctx context.Context, rawToken string) (map[st
 	return f.claims, nil
 }
 
-func stubOIDCVerifier(t *testing.T, verifier oidcClaimsVerifier, err error) {
+func stubOIDCVerifier(t *testing.T, verifier IDTokenVerifier, err error) {
 	t.Helper()
 	original := newOIDCClaimsVerifier
 	t.Cleanup(func() { newOIDCClaimsVerifier = original })
-	newOIDCClaimsVerifier = func(ctx context.Context, conf *Config) (oidcClaimsVerifier, error) {
+	newOIDCClaimsVerifier = func(ctx context.Context, settings OAuthSettings, policy idTokenAudiencePolicy) (IDTokenVerifier, error) {
 		if err != nil {
 			return nil, err
 		}
@@ -39,13 +39,13 @@ func stubOIDCVerifier(t *testing.T, verifier oidcClaimsVerifier, err error) {
 func enableOAuth(t *testing.T, cfg *Config, rolesClaim string) {
 	t.Helper()
 	cfg.Auth.Server.OAuth.Enabled = true
-	cfg.Auth.Server.OAuth.IdpWellKnownURL = "https://idp.example/.well-known/openid-configuration"
+	cfg.Auth.Server.OAuth.IdpWellKnownURL = "https://idp.example"
 	cfg.Auth.Server.OAuth.ClientID = "test-client"
 	cfg.Auth.Server.OAuth.RolesClaim = rolesClaim
 	SetPlatformConfiguration(*cfg)
 }
 
-func TestExtractRoles(t *testing.T) {
+func TestRolesFromClaim(t *testing.T) {
 	testCases := []struct {
 		name      string
 		claims    map[string]interface{}
@@ -98,75 +98,11 @@ func TestExtractRoles(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			got := extractRoles(testCase.claims, testCase.claimPath)
+			got, _ := rolesFromClaim(testCase.claims, testCase.claimPath)
 			if !reflect.DeepEqual(got, testCase.want) {
 				t.Fatalf("expected %v, got %v", testCase.want, got)
 			}
 		})
-	}
-}
-
-func TestAllAuthMiddlewareRequiresEveryVerifier(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
-
-	allow := func(*http.Request) (authResult, error) { return authResult{}, nil }
-	deny := func(*http.Request) (authResult, error) { return authResult{}, ErrAuthRequired }
-
-	req := httptest.NewRequest(http.MethodGet, "/secure", nil)
-
-	res := httptest.NewRecorder()
-	allAuthMiddleware(handler, allow, allow).ServeHTTP(res, req)
-	if res.Code != http.StatusNoContent {
-		t.Fatalf("expected 204 when every verifier passes, got %d", res.Code)
-	}
-
-	res = httptest.NewRecorder()
-	allAuthMiddleware(handler, allow, deny).ServeHTTP(res, req)
-	if res.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 when one verifier fails, got %d", res.Code)
-	}
-}
-
-func TestAnyAuthMiddlewareAcceptsOneVerifier(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
-
-	deny := func(*http.Request) (authResult, error) { return authResult{}, ErrAuthRequired }
-	allow := func(*http.Request) (authResult, error) { return authResult{Username: "alice"}, nil }
-
-	res := httptest.NewRecorder()
-	anyAuthMiddleware(handler, deny, allow).ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/secure", nil))
-	if res.Code != http.StatusNoContent {
-		t.Fatalf("expected 204 when one verifier passes, got %d", res.Code)
-	}
-
-	res = httptest.NewRecorder()
-	anyAuthMiddleware(handler, deny, deny).ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/secure", nil))
-	if res.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 when every verifier fails, got %d", res.Code)
-	}
-}
-
-func TestAnyAuthMiddlewareReportsIDPOutage(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("handler must not run when the identity provider is unavailable")
-	})
-
-	unavailable := func(*http.Request) (authResult, error) {
-		return authResult{}, errOIDCUnavailable
-	}
-
-	res := httptest.NewRecorder()
-	anyAuthMiddleware(handler, unavailable).ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/secure", nil))
-
-	if res.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503 when the IdP is unavailable, got %d", res.Code)
-	}
-	if res.Header().Get("Retry-After") == "" {
-		t.Fatal("expected a Retry-After header on the 503 response")
 	}
 }
 
@@ -178,14 +114,14 @@ func TestOAuthRouteWithoutRolesInvokesHandler(t *testing.T) {
 		"preferred_username": "alice",
 	}}, nil)
 
-	var issuer, username string
+	var identity Identity
+	var hasIdentity bool
 	router, err := newRouter(Routes{{
 		Path:   "/open",
 		Method: http.MethodGet,
 		Auth:   AuthOAuth,
 		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
-			issuer = IssuerFromContext(r.Context())
-			username = UsernameFromContext(r.Context())
+			identity, hasIdentity = IdentityFromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
 		},
 	}})
@@ -201,8 +137,11 @@ func TestOAuthRouteWithoutRolesInvokesHandler(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected 200 for a role-less protected route, got %d", res.Code)
 	}
-	if issuer != "https://idp.example" || username != "alice" {
-		t.Fatalf("expected issuer and username in context, got %q / %q", issuer, username)
+	if !hasIdentity {
+		t.Fatal("expected the handler to read the identity")
+	}
+	if identity.Issuer != "https://idp.example" || identity.Username != "alice" {
+		t.Fatalf("expected issuer and username in the identity, got %q / %q", identity.Issuer, identity.Username)
 	}
 }
 
@@ -220,7 +159,9 @@ func TestOAuthRouteEnforcesRoles(t *testing.T) {
 		Auth:          AuthOAuth,
 		RolesRequired: []string{"admin"},
 		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
-			granted = RolesFromContext(r.Context())
+			if identity, ok := IdentityFromContext(r.Context()); ok {
+				granted = identity.Roles
+			}
 			w.WriteHeader(http.StatusOK)
 		},
 	}})
@@ -233,8 +174,8 @@ func TestOAuthRouteEnforcesRoles(t *testing.T) {
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
-	if res.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 when the required role is missing, got %d", res.Code)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when the required role is missing, got %d", res.Code)
 	}
 	if len(granted) != 0 {
 		t.Fatalf("handler must not run, got roles %v", granted)
@@ -253,7 +194,7 @@ func TestLocalOrOIDCAcceptsEitherToken(t *testing.T) {
 	var oauthAvailable bool
 	original := newOIDCClaimsVerifier
 	t.Cleanup(func() { newOIDCClaimsVerifier = original })
-	newOIDCClaimsVerifier = func(ctx context.Context, conf *Config) (oidcClaimsVerifier, error) {
+	newOIDCClaimsVerifier = func(ctx context.Context, settings OAuthSettings, policy idTokenAudiencePolicy) (IDTokenVerifier, error) {
 		if !oauthAvailable {
 			return fakeClaimsVerifier{err: errors.New("idp down")}, nil
 		}
@@ -339,13 +280,6 @@ func TestLocalOrOIDCRequiresBothStrategiesEnabled(t *testing.T) {
 	}})
 	if err == nil {
 		t.Fatal("expected local-or-oidc to fail when oauth is disabled")
-	}
-}
-
-func TestRouteWithoutAuthStrategyFailsClosedAtRouterBuild(t *testing.T) {
-	// Guard against a future change that makes an empty strategy mean public.
-	if _, err := routeAuthStrategies(Route{}); !errors.Is(err, ErrRouteAuthStrategyRequired) {
-		t.Fatalf("expected ErrRouteAuthStrategyRequired, got %v", err)
 	}
 }
 
@@ -437,6 +371,42 @@ func TestRecoveryMiddlewareReturnsJSON500WithRequestID(t *testing.T) {
 	}
 	if body["request_id"] != requestID {
 		t.Fatalf("expected body request_id %q, got %q", requestID, body["request_id"])
+	}
+}
+
+func TestRequestIDIsAvailableOnAuthenticatedRequests(t *testing.T) {
+	setupTestPlatformState(t)
+
+	token, err := LocalJwt.NewLocalJwtToken(map[string]interface{}{"sub": "alice"})
+	if err != nil {
+		t.Fatalf("NewLocalJwtToken failed: %v", err)
+	}
+
+	var seen string
+	router, err := newRouter(Routes{{
+		Path:   "/secure",
+		Method: http.MethodGet,
+		Auth:   AuthLocalJWT,
+		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
+			seen = RequestIDFromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		},
+	}})
+	if err != nil {
+		t.Fatalf("newRouter failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/secure", nil)
+	req.Header.Set(RequestIDHeader, "authenticated-request-id")
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected the authenticated request to succeed, got %d", res.Code)
+	}
+	if seen != "authenticated-request-id" {
+		t.Fatalf("expected the request id in the authenticated context, got %q", seen)
 	}
 }
 
