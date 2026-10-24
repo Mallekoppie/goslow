@@ -2,7 +2,6 @@ package platform
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 )
 
@@ -89,23 +88,4 @@ func publicPaths(conf *Config) (publicPathMatcher, error) {
 
 func (a AuthStrategy) Enabled() bool {
 	return a != "" && a != AuthNone
-}
-
-// routeAuthStrategies resolves the strategies for a route. An explicit Route.Auth
-// is mandatory; there is no inference from enabled server strategies.
-func routeAuthStrategies(route Route) ([]AuthStrategy, error) {
-	if route.Auth == "" {
-		return nil, ErrRouteAuthStrategyRequired
-	}
-
-	switch route.Auth {
-	case AuthNone:
-		return nil, nil
-	case AuthLocalJWT, AuthOAuth, AuthBasic:
-		return []AuthStrategy{route.Auth}, nil
-	case AuthLocalOrOIDC:
-		return []AuthStrategy{AuthLocalJWT, AuthOAuth}, nil
-	default:
-		return nil, fmt.Errorf("unknown auth strategy %q", route.Auth)
-	}
 }

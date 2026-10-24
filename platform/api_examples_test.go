@@ -106,23 +106,6 @@ func Example_getComponentConfiguration() {
 	// Output: demo 2
 }
 
-func Example_routeAuthStrategies() {
-	strategies, err := routeAuthStrategies(Route{Auth: AuthLocalJWT})
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(strategies)
-
-	explicit, err := routeAuthStrategies(Route{Auth: AuthLocalOrOIDC})
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(explicit)
-	// Output:
-	// [local-jwt]
-	// [local-jwt oauth]
-}
-
 func Example_requestIDMiddleware() {
 	cfg := createDefaultConfiguration()
 	// Keep the example output limited to the request id.

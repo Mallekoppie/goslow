@@ -283,13 +283,6 @@ func TestLocalOrOIDCRequiresBothStrategiesEnabled(t *testing.T) {
 	}
 }
 
-func TestRouteWithoutAuthStrategyFailsClosedAtRouterBuild(t *testing.T) {
-	// Guard against a future change that makes an empty strategy mean public.
-	if _, err := routeAuthStrategies(Route{}); !errors.Is(err, ErrRouteAuthStrategyRequired) {
-		t.Fatalf("expected ErrRouteAuthStrategyRequired, got %v", err)
-	}
-}
-
 func TestRouterRejectsUnknownOrDisabledStrategies(t *testing.T) {
 	cfg := setupTestPlatformState(t)
 	handler := func(w http.ResponseWriter, r *http.Request) {}
