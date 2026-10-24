@@ -140,11 +140,7 @@ func (i *connectAuthInterceptor) authorize(ctx context.Context, procedure string
 
 	authorizedContext, err := i.authorizer.Authorize(ctx, rule, credentialFromHeader(header))
 	if err != nil {
-		if AuthorizationOutcome(err) == AuthOutcomeCancelled {
-			recordAuthDecision(rpcTransport(header), "cancelled")
-		} else {
-			recordAuthDecision(rpcTransport(header), "denied")
-		}
+		recordAuthorizationFailure(rpcTransport(header), err)
 		return ctx, connectAuthorizationError(err)
 	}
 
@@ -156,10 +152,7 @@ func (i *connectAuthInterceptor) authorize(ctx context.Context, procedure string
 // RPC transports carry bearer tokens only; basic credentials are rejected when
 // the interceptor is constructed.
 func credentialFromHeader(header http.Header) Credential {
-	if token, ok := bearerToken(header.Get("Authorization")); ok {
-		return BearerCredential(token)
-	}
-	return Credential{}
+	return credentialFromAuthorizationHeader(header)
 }
 
 // connectAuthorizationError maps the authorizer's transport-neutral outcome

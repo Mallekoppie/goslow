@@ -6,8 +6,9 @@ OAuth or local-JWT settings are needed.
 
 ## Prerequisites
 
-- Go 1.27.2. The module resolves the platform through a `replace` directive, so
-  no separate install is needed.
+- Go 1.27.2. This directory has no `go.mod` of its own; it builds as part of the
+  root module and uses the platform source in this repository, so no separate
+  install is needed. `go run .` still works from this directory.
 - `curl` for the example calls.
 - For `/secrets`: a reachable Vault server holding the configured secret path.
   The other routes run without Vault.

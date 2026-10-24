@@ -24,6 +24,32 @@ client (`federate-token-client`), so `ValidateClientToken` verifies its
 signature, expiry, and issuer but deliberately skips the audience check.
 Requiring the server's client ID there would reject every forwarded token.
 
+Route authorization does enforce the audience check: the token's `aud` claim
+must contain the client ID configured for the service that receives it.
+
+## Keycloak audience mapper
+Keycloak does not put the requesting client's ID in `aud` by default. Stock
+Keycloak issues tokens whose audience is `account` (plus other built-in
+audiences), so a valid token with the `user` role still fails the route's
+audience check and returns `401 Unauthorized`.
+
+Add an **Audience** protocol mapper to each client (or a realm-level mapper that
+applies to both) with `Included Custom Audience` set to the service's client ID:
+
+- `federate-token-client` must be included in the `aud` of tokens the dialer
+  presents to the client service.
+- `federate-token-server` must be included in the `aud` of the client service's
+  own route token, which the server service verifies.
+
+For example, a token accepted by the server service contains:
+
+```json
+"aud": ["account", "federate-token-server"]
+```
+
+The forwarded client token still carries `federate-token-client` in `aud`; that
+is expected, and `ValidateClientToken` deliberately ignores it.
+
 # Required roles and Keycloak realm roles
 Both routes require the `user` role (`RolesRequired: []string{"user"}`), so a
 token that verifies without that role returns `403 Forbidden`.

@@ -234,6 +234,26 @@ func NewAuthorizer(settings AuthSettings, options ...AuthorizerOption) (*Authori
 	return authorizer, nil
 }
 
+// newAuthorizerFromConfig snapshots the auth settings and builds the ID token
+// verifier factory the authorizer needs. The verifier is constructed lazily per
+// authorization attempt so discovery happens on the request path and can report
+// an outage instead of failing startup.
+func newAuthorizerFromConfig(conf *Config) (*Authorizer, error) {
+	settings := AuthSettingsFromConfig(conf)
+	return NewAuthorizer(settings, WithIDTokenVerifierFactory(
+		func(ctx context.Context) (IDTokenVerifier, error) {
+			verifier, err := newOIDCClaimsVerifier(ctx, settings.OAuth, requireConfiguredClientID)
+			if err != nil {
+				return nil, err
+			}
+			if verifier == nil {
+				return nil, errors.New("id token verifier is not configured")
+			}
+			return verifier, nil
+		},
+	))
+}
+
 // clone makes the settings snapshot independent of the caller's maps. Strings
 // and booleans are already copied by value.
 func (s AuthSettings) clone() AuthSettings {
@@ -462,6 +482,8 @@ func identityFromClaims(claims map[string]interface{}, roles []string, rawToken 
 		identity.Issuer = issuer
 	}
 	if username, ok := claims["preferred_username"].(string); ok {
+		identity.Username = username
+	} else if username, ok := claims["username"].(string); ok {
 		identity.Username = username
 	}
 	return identity

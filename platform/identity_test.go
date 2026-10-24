@@ -219,6 +219,55 @@ func TestAuthorizeLocalJWTReadsTheConfiguredRolesClaim(t *testing.T) {
 	}
 }
 
+func TestAuthorizeLocalJWTFallsBackToTheUsernameClaim(t *testing.T) {
+	settings := AuthSettings{LocalJWT: localJWTSettings()}
+	authorizer := mustAuthorizer(t, settings)
+	rule := mustRule(t, authorizer, AuthLocalJWT, nil)
+
+	token := signLocalJWT(t, settings.LocalJWT.SigningKey, jwt.SigningMethodHS256, map[string]interface{}{
+		"username": "legacy-user",
+		"roles":    []string{"user"},
+	})
+
+	ctx, err := authorizer.Authorize(context.Background(), rule, BearerCredential(token))
+	if err != nil {
+		t.Fatalf("Authorize failed: %v", err)
+	}
+
+	identity, ok := IdentityFromContext(ctx)
+	if !ok {
+		t.Fatal("expected an identity in the returned context")
+	}
+	if identity.Username != "legacy-user" {
+		t.Fatalf("expected the username claim when preferred_username is absent, got %q", identity.Username)
+	}
+}
+
+func TestAuthorizeLocalJWTPrefersPreferredUsernameOverUsername(t *testing.T) {
+	settings := AuthSettings{LocalJWT: localJWTSettings()}
+	authorizer := mustAuthorizer(t, settings)
+	rule := mustRule(t, authorizer, AuthLocalJWT, nil)
+
+	token := signLocalJWT(t, settings.LocalJWT.SigningKey, jwt.SigningMethodHS256, map[string]interface{}{
+		"preferred_username": "preferred",
+		"username":           "legacy",
+		"roles":              []string{"user"},
+	})
+
+	ctx, err := authorizer.Authorize(context.Background(), rule, BearerCredential(token))
+	if err != nil {
+		t.Fatalf("Authorize failed: %v", err)
+	}
+
+	identity, ok := IdentityFromContext(ctx)
+	if !ok {
+		t.Fatal("expected an identity in the returned context")
+	}
+	if identity.Username != "preferred" {
+		t.Fatalf("expected preferred_username to win, got %q", identity.Username)
+	}
+}
+
 func TestAuthorizeLocalJWTUsesSingularRoleOnlyWhenTheConfiguredClaimIsAbsent(t *testing.T) {
 	settings := AuthSettings{LocalJWT: localJWTSettings()}
 	authorizer := mustAuthorizer(t, settings)
