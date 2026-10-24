@@ -30,6 +30,11 @@ go version
 protoc --version
 gopls version | head -n 1
 staticcheck -version
+if command -v gh >/dev/null 2>&1; then
+  echo "gh: $(gh --version 2>/dev/null | head -n 1)"
+else
+  echo "    ! gh missing - rebuild the container to install the GitHub CLI"
+fi
 if command -v claude >/dev/null 2>&1; then
   echo "claude: $(claude --version 2>/dev/null | head -n 1)"
 else
@@ -58,6 +63,7 @@ fi
 cat <<'EOF'
 
 ==> Ready. Useful commands:
+    gh auth login                          # first run signs in for issue tracking and PRs
     claude                                 # first run signs in if no token is forwarded
     go test -race ./...                    # root module
     go test -race -tags integration ./...  # tests needing a live IdP/Vault
@@ -72,6 +78,10 @@ install was skipped (offline), run:
         --marketplace anthropics/claude-plugins-official
 Then run the setup skill in Claude to tailor it to this repo:
     /mattpocock-skills:setup-matt-pocock-skills
+
+GitHub CLI auth persists in the same way under /home/vscode/.config/gh. Run
+`gh auth login` once per container; issues, PRs and `gh` workflows use it.
+Issues live in GitHub Issues; see docs/agents/issue-tracker.md.
 
 Podman note: runArgs uses --userns=keep-id so the container uid matches the
 host uid that owns the workspace. See .devcontainer/README.md.
