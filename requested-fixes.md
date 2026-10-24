@@ -1,5 +1,11 @@
 # goslow completion requirements — Connect transport
 
+> **Historical record.** This document describes the work as it stood at the
+> time it was written. Some symbols it names have since been removed or renamed;
+> in particular, `Route.AuthRequired` and `routeAuthStrategies` were retired by
+> [ADR-0001](docs/adr/0001-one-identity-module.md). Read the analysis below as
+> history, not as current API.
+
 ## Status and context
 
 This document is the remaining work for goslow after the Connect migration on

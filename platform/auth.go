@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// AuthStrategy enumerates supported auth modes for a route.
+// AuthStrategy enumerates supported auth strategies for a route.
 type AuthStrategy string
 
 const (

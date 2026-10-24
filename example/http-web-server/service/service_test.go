@@ -95,3 +95,15 @@ func TestGetOAuthDetailsDescribesCallerWithRequiredRole(t *testing.T) {
 		t.Fatalf("roles = %v, want [%q]", body.Roles, OAuthRequiredRole)
 	}
 }
+
+func TestGetSecretsReturnsOnlyTheVaultErrorWhenVaultIsDisabled(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	GetSecrets(recorder, httptest.NewRequest(http.MethodGet, "/secrets", nil))
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+	if body := recorder.Body.String(); body != "vault not enabled" {
+		t.Fatalf("body = %q, want %q", body, "vault not enabled")
+	}
+}

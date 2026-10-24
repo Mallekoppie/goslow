@@ -78,8 +78,8 @@ func HandleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	username, ok := identity.Claims["username"].(string)
-	if !ok {
+	username := identity.Username
+	if username == "" {
 		platform.Log.Error("Username not found in JWT claims")
 		http.Error(w, "Invalid JWT claims", http.StatusInternalServerError)
 		return
@@ -99,8 +99,8 @@ func HandleRenew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	username, ok := identity.Claims["username"].(string)
-	if !ok {
+	username := identity.Username
+	if username == "" {
 		http.Error(w, "Username not found in JWT claims", http.StatusInternalServerError)
 		return
 	}

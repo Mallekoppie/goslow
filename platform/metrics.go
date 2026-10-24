@@ -193,6 +193,17 @@ func recordAuthDecision(transport, outcome string) {
 	authDecisionsTotal.WithLabelValues(transport, outcome).Inc()
 }
 
+// recordAuthorizationFailure records a failed authorization attempt. Cancellation
+// stays distinct from a denial; both adapters classify it here so the transports
+// cannot drift.
+func recordAuthorizationFailure(transport string, err error) {
+	if AuthorizationOutcome(err) == AuthOutcomeCancelled {
+		recordAuthDecision(transport, "cancelled")
+		return
+	}
+	recordAuthDecision(transport, "denied")
+}
+
 func trackInflight(transport string) func() {
 	if !metricsEnabled() {
 		return func() {}

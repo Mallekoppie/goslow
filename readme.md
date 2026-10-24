@@ -50,7 +50,7 @@ The `platform` directory provides shared infrastructure for all services in the 
 - Always use platform helpers for logging, config, and database access.
 - Configure all platform features in `platform/config.yml`.
 - Extend middleware with the provided helpers.
-- The identity module builds the ID-token verifier from the OAuth settings when a router or handler is constructed.
+- The identity module snapshots the OAuth settings when a router or handler is constructed; it builds the ID-token verifier lazily on each authorization attempt.
 - Place tests for platform features in the same directory (e.g., `boltdb_test.go`, `jwt_test.go`).
 
 ### Example
@@ -467,6 +467,10 @@ Protection failures map consistently on every transport:
 | Missing or invalid credential | `401 Unauthorized` | `CodeUnauthenticated` |
 | Verified caller lacking a required role | `403 Forbidden` | `CodePermissionDenied` |
 | Identity provider unavailable, no definite rejection | `503` + `Retry-After` | `CodeUnavailable` |
+| Request cancelled before verification completed | `499` | `CodeCanceled` |
+
+A cancelled request is not a rejection or a role denial; the caller went away before
+verification could establish or reject an identity. Adapters report it distinctly.
 
 An OAuth route with no `RolesRequired` only verifies the token. If the identity provider
 cannot be reached at request time the route returns `503 Service Unavailable` with a
@@ -555,7 +559,7 @@ scrape_configs:
 
 Exported families: `goslow_http_requests_total`, `goslow_http_request_duration_seconds`,
 `goslow_rpc_requests_total`, `goslow_rpc_request_duration_seconds`,
-`goslow_auth_decisions_total` (`allowed`/`denied`/`anonymous`), and
+`goslow_auth_decisions_total` (`allowed`/`denied`/`cancelled`/`anonymous`), and
 `goslow_inflight_requests`. Labels use registered routes and procedure names only;
 tokens, headers, and bodies are never recorded. The listener starts and stops with
 the server context.
