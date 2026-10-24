@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -186,5 +187,81 @@ func TestMetricsListenerIsIsolated(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("metrics server did not stop")
+	}
+}
+
+func httpAuthDecisionCount(t *testing.T, outcome string) float64 {
+	t.Helper()
+
+	marker := `goslow_auth_decisions_total{outcome="` + outcome + `",transport="http"}`
+	for _, line := range strings.Split(scrapeMetrics(t), "\n") {
+		if !strings.HasPrefix(line, marker) {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		value, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+		if err != nil {
+			t.Fatalf("unable to parse metric line %q: %v", line, err)
+		}
+		return value
+	}
+	return 0
+}
+
+func TestMetricsRecordHTTPAuthDecisions(t *testing.T) {
+	enableTestMetrics(t)
+
+	cfg, err := GetPlatformConfiguration()
+	if err != nil {
+		t.Fatalf("GetPlatformConfiguration failed: %v", err)
+	}
+	cfg.Auth.Server.LocalJwt.Enabled = true
+	cfg.Auth.Server.LocalJwt.JwtSigningKey = "metrics-http-key"
+	cfg.Auth.Server.LocalJwt.JwtSigningMethod = "HS256"
+	if err := SetPlatformConfiguration(*cfg); err != nil {
+		t.Fatalf("SetPlatformConfiguration failed: %v", err)
+	}
+
+	router, err := newRouter(Routes{{
+		Path:   "/secure",
+		Method: http.MethodGet,
+		Auth:   AuthLocalJWT,
+		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		},
+	}})
+	if err != nil {
+		t.Fatalf("newRouter failed: %v", err)
+	}
+
+	allowedBefore := httpAuthDecisionCount(t, "allowed")
+	deniedBefore := httpAuthDecisionCount(t, "denied")
+
+	denied := httptest.NewRecorder()
+	router.ServeHTTP(denied, httptest.NewRequest(http.MethodGet, "/secure", nil))
+	if denied.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without a credential, got %d", denied.Code)
+	}
+
+	token, err := LocalJwt.NewLocalJwtToken(map[string]interface{}{"sub": "alice"})
+	if err != nil {
+		t.Fatalf("NewLocalJwtToken failed: %v", err)
+	}
+	allowed := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/secure", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(allowed, request)
+	if allowed.Code != http.StatusNoContent {
+		t.Fatalf("expected an authenticated request to succeed, got %d", allowed.Code)
+	}
+
+	if got := httpAuthDecisionCount(t, "denied"); got <= deniedBefore {
+		t.Fatalf("expected the denied decision to be counted, got %v (before %v)", got, deniedBefore)
+	}
+	if got := httpAuthDecisionCount(t, "allowed"); got <= allowedBefore {
+		t.Fatalf("expected the allowed decision to be counted, got %v (before %v)", got, allowedBefore)
 	}
 }

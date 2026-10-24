@@ -102,3 +102,67 @@ func TestReadJsonRequestUsesConfiguredLimit(t *testing.T) {
 		t.Fatalf("expected the explicit limit to apply: %v", err)
 	}
 }
+
+func TestApplicationHandlerHTTPRoutesUseTheIdentityAuthorizer(t *testing.T) {
+	setupTestPlatformState(t)
+
+	handler, err := NewApplicationHandler(ApplicationServerOptions{
+		DisableAuthFromConfig: true,
+		Routes: Routes{{
+			Path:          "/admin",
+			Method:        http.MethodGet,
+			Auth:          AuthLocalJWT,
+			RolesRequired: []string{"admin"},
+			HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
+				if _, ok := IdentityFromContext(r.Context()); !ok {
+					t.Error("expected the combined application to store the identity")
+				}
+				w.WriteHeader(http.StatusNoContent)
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewApplicationHandler failed: %v", err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	adminToken, err := LocalJwt.NewLocalJwtToken(map[string]interface{}{"roles": []string{"admin"}})
+	if err != nil {
+		t.Fatalf("NewLocalJwtToken failed: %v", err)
+	}
+	readerToken, err := LocalJwt.NewLocalJwtToken(map[string]interface{}{"roles": []string{"reader"}})
+	if err != nil {
+		t.Fatalf("NewLocalJwtToken failed: %v", err)
+	}
+
+	testCases := []struct {
+		name       string
+		credential string
+		wantStatus int
+	}{
+		{name: "missing credential", wantStatus: http.StatusUnauthorized},
+		{name: "missing role", credential: readerToken, wantStatus: http.StatusForbidden},
+		{name: "required role", credential: adminToken, wantStatus: http.StatusNoContent},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			request, err := http.NewRequest(http.MethodGet, server.URL+"/admin", nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+			if testCase.credential != "" {
+				request.Header.Set("Authorization", "Bearer "+testCase.credential)
+			}
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != testCase.wantStatus {
+				t.Fatalf("expected %d, got %d", testCase.wantStatus, response.StatusCode)
+			}
+		})
+	}
+}

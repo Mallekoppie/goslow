@@ -35,6 +35,11 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 		return nil, err
 	}
 
+	authorizer, err := newAuthorizerFromConfig(conf)
+	if err != nil {
+		return nil, err
+	}
+
 	for index := range serviceRoutes {
 		route := serviceRoutes[index]
 		var handler http.Handler
@@ -53,29 +58,18 @@ func newRouter(serviceRoutes Routes) (*mux.Router, error) {
 			route.Auth = AuthNone
 		}
 
-		strategies, err := routeAuthStrategies(route)
+		if route.Auth == "" {
+			return nil, fmt.Errorf("route %s %s: %w", route.Method, route.Path, ErrRouteAuthStrategyRequired)
+		}
+
+		// The rule is resolved once, here, against the settings snapshot.
+		rule, err := authorizer.ResolveAccessRule(route.Auth, route.RolesRequired)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("route %s %s: %w", route.Method, route.Path, err)
 		}
+		handler = authorizeHTTPRoute(handler, authorizer, rule)
 
-		verifiers := make([]authVerifier, 0, len(strategies))
-		for _, strategy := range strategies {
-			verifier, err := authStrategyVerifier(conf, strategy, route.RolesRequired)
-			if err != nil {
-				return nil, err
-			}
-			verifiers = append(verifiers, verifier)
-		}
-
-		if len(verifiers) > 0 {
-			if route.Auth == AuthLocalOrOIDC {
-				handler = anyAuthMiddleware(handler, verifiers...)
-			} else {
-				handler = allAuthMiddleware(handler, verifiers...)
-			}
-		}
-
-		// Logging wraps auth so 401/403 responses are logged and counted.
+		// Logging wraps auth so 401/403 responses are access logged.
 		handler = loggingMiddleware(handler, route.Path, route.SlaMs)
 
 		// HTTP routes are bounded by http.server.writetimeoutseconds. Connect

@@ -25,7 +25,6 @@ const (
 	contextOAuthIssuer            contextKey = "oauth.issuer"
 	contextLocalJwtClaims         contextKey = "localjwt.claims"
 	contextRequestID              contextKey = "request.id"
-	contextAuthOutcome            contextKey = "auth.outcome"
 
 	// RequestIDHeader is the request correlation header.
 	RequestIDHeader = "X-Request-ID"
@@ -75,15 +74,6 @@ func ClaimsFromContext(ctx context.Context) map[string]interface{} {
 func RequestIDFromContext(ctx context.Context) string {
 	if requestID, ok := ctx.Value(contextRequestID).(string); ok {
 		return requestID
-	}
-	return ""
-}
-
-// authOutcomeFromContext reports how authentication resolved for the request:
-// allowed, denied, or anonymous.
-func authOutcomeFromContext(ctx context.Context) string {
-	if outcome, ok := ctx.Value(contextAuthOutcome).(string); ok {
-		return outcome
 	}
 	return ""
 }
@@ -173,12 +163,6 @@ func loggingMiddleware(next http.Handler, route string, slaMs int64) http.Handle
 		duration := time.Since(start)
 
 		observeHTTPRequest(r.Method, route, wrapped.Status(), duration)
-		switch outcome := authOutcomeFromContext(r.Context()); outcome {
-		case "":
-			recordAuthDecision("http", "anonymous")
-		case "allowed":
-			recordAuthDecision("http", "allowed")
-		}
 
 		if Log != nil {
 			Log.Info("Request completed",
@@ -302,7 +286,6 @@ func anyAuthMiddleware(inner http.Handler, verifiers ...authVerifier) http.Handl
 		}
 
 		ctx := applyAuthResult(r.Context(), mergeAuthResults(results...))
-		ctx = context.WithValue(ctx, contextAuthOutcome, "allowed")
 		inner.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -322,7 +305,6 @@ func allAuthMiddleware(inner http.Handler, verifiers ...authVerifier) http.Handl
 		}
 
 		ctx := applyAuthResult(r.Context(), mergeAuthResults(results...))
-		ctx = context.WithValue(ctx, contextAuthOutcome, "allowed")
 		inner.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -376,7 +358,7 @@ type idTokenClaimsVerifier struct {
 func (v idTokenClaimsVerifier) Verify(ctx context.Context, rawToken string) (map[string]interface{}, error) {
 	idToken, err := v.verifier.Verify(ctx, rawToken)
 	if err != nil {
-		return nil, err
+		return nil, classifyIDTokenVerificationError(err)
 	}
 
 	claims := make(map[string]interface{})
@@ -384,6 +366,17 @@ func (v idTokenClaimsVerifier) Verify(ctx context.Context, rawToken string) (map
 		return nil, err
 	}
 	return claims, nil
+}
+
+// classifyIDTokenVerificationError separates an identity-provider outage from a
+// rejected credential. go-oidc reports a failed JWKS fetch as "fetching keys ..."
+// and discards the wrapped transport error, so the message is the only signal
+// available at this layer. A failed key fetch says nothing about the credential.
+func classifyIDTokenVerificationError(err error) error {
+	if strings.Contains(err.Error(), "fetching keys") {
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	return err
 }
 
 var (

@@ -71,15 +71,14 @@ func HandleQuery(w http.ResponseWriter, r *http.Request) {
 	// Handle query logic here
 	// For example, return user information based on JWT token
 
-	result := platform.ClaimsFromContext(r.Context())
-	if result == nil {
-		platform.Log.Error("No JWT claims found in context")
+	identity, ok := platform.IdentityFromContext(r.Context())
+	if !ok {
+		platform.Log.Error("No identity found in context")
 		w.Write([]byte("Query successful"))
 		return
 	}
 
-	resultMap := result
-	username, ok := resultMap["username"].(string)
+	username, ok := identity.Claims["username"].(string)
 	if !ok {
 		platform.Log.Error("Username not found in JWT claims")
 		http.Error(w, "Invalid JWT claims", http.StatusInternalServerError)
@@ -94,14 +93,13 @@ func HandleRenew(w http.ResponseWriter, r *http.Request) {
 	// Handle token renewal logic here
 	// For example, generate a new JWT token with updated claims
 
-	result := platform.ClaimsFromContext(r.Context())
-	if result == nil {
-		http.Error(w, "No JWT claims found in context", http.StatusUnauthorized)
+	identity, ok := platform.IdentityFromContext(r.Context())
+	if !ok {
+		http.Error(w, "No identity found in context", http.StatusUnauthorized)
 		return
 	}
 
-	resultMap := result
-	username, ok := resultMap["username"].(string)
+	username, ok := identity.Claims["username"].(string)
 	if !ok {
 		http.Error(w, "Username not found in JWT claims", http.StatusInternalServerError)
 		return

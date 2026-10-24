@@ -104,7 +104,7 @@ func (i *connectAuthInterceptor) WrapStreamingHandler(next connect.StreamingHand
 func (i *connectAuthInterceptor) authorize(ctx context.Context, procedure string, header http.Header) (context.Context, error) {
 	if i.public.matches("", procedure) {
 		recordAuthDecision(rpcTransport(header), "anonymous")
-		return context.WithValue(ctx, contextAuthOutcome, "anonymous"), nil
+		return ctx, nil
 	}
 
 	if _, ok := bearerToken(header.Get("Authorization")); !ok {
@@ -127,7 +127,7 @@ func (i *connectAuthInterceptor) authorize(ctx context.Context, procedure string
 		}
 		authorizedContext := applyAuthResult(ctx, result)
 		recordAuthDecision(rpcTransport(header), "allowed")
-		return context.WithValue(authorizedContext, contextAuthOutcome, "allowed"), nil
+		return authorizedContext, nil
 	}
 
 	recordAuthDecision(rpcTransport(header), "denied")

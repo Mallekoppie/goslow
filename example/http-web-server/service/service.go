@@ -119,17 +119,14 @@ func GetSecrets(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetOAuthDetails(w http.ResponseWriter, r *http.Request) {
-	resultList := platform.RolesFromContext(r.Context())
-	if len(resultList) == 0 {
-		http.Error(w, "No OAuth roles found in context", http.StatusUnauthorized)
+	identity, ok := platform.IdentityFromContext(r.Context())
+	if !ok || len(identity.Roles) == 0 {
+		http.Error(w, "No roles found for the caller", http.StatusUnauthorized)
 		return
 	}
 
-	username := platform.UsernameFromContext(r.Context())
-	idfRef := platform.IssuerFromContext(r.Context())
-
-	platform.Log.Info("OAuth details", zap.String("role_1", resultList[0]), zap.String("username", username),
-		zap.String("idp_ref", idfRef))
+	platform.Log.Info("OAuth details", zap.String("role_1", identity.Roles[0]), zap.String("username", identity.Username),
+		zap.String("idp_ref", identity.Issuer))
 
 }
 

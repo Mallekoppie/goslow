@@ -178,14 +178,14 @@ func TestOAuthRouteWithoutRolesInvokesHandler(t *testing.T) {
 		"preferred_username": "alice",
 	}}, nil)
 
-	var issuer, username string
+	var identity Identity
+	var hasIdentity bool
 	router, err := newRouter(Routes{{
 		Path:   "/open",
 		Method: http.MethodGet,
 		Auth:   AuthOAuth,
 		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
-			issuer = IssuerFromContext(r.Context())
-			username = UsernameFromContext(r.Context())
+			identity, hasIdentity = IdentityFromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
 		},
 	}})
@@ -201,8 +201,11 @@ func TestOAuthRouteWithoutRolesInvokesHandler(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("expected 200 for a role-less protected route, got %d", res.Code)
 	}
-	if issuer != "https://idp.example" || username != "alice" {
-		t.Fatalf("expected issuer and username in context, got %q / %q", issuer, username)
+	if !hasIdentity {
+		t.Fatal("expected the handler to read the identity")
+	}
+	if identity.Issuer != "https://idp.example" || identity.Username != "alice" {
+		t.Fatalf("expected issuer and username in the identity, got %q / %q", identity.Issuer, identity.Username)
 	}
 }
 
@@ -220,7 +223,9 @@ func TestOAuthRouteEnforcesRoles(t *testing.T) {
 		Auth:          AuthOAuth,
 		RolesRequired: []string{"admin"},
 		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
-			granted = RolesFromContext(r.Context())
+			if identity, ok := IdentityFromContext(r.Context()); ok {
+				granted = identity.Roles
+			}
 			w.WriteHeader(http.StatusOK)
 		},
 	}})
@@ -233,8 +238,8 @@ func TestOAuthRouteEnforcesRoles(t *testing.T) {
 	res := httptest.NewRecorder()
 	router.ServeHTTP(res, req)
 
-	if res.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 when the required role is missing, got %d", res.Code)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when the required role is missing, got %d", res.Code)
 	}
 	if len(granted) != 0 {
 		t.Fatalf("handler must not run, got roles %v", granted)

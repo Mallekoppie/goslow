@@ -49,6 +49,6 @@ var Routes = platform.Routes{
 		HandlerFunc:   service.GetOAuthDetails,
 		SlaMs:         0,
 		RolesRequired: []string{"read"},
-		Auth:          platform.AuthNone,
+		Auth:          platform.AuthOAuth,
 	},
 }

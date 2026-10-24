@@ -109,25 +109,3 @@ func routeAuthStrategies(route Route) ([]AuthStrategy, error) {
 		return nil, fmt.Errorf("unknown auth strategy %q", route.Auth)
 	}
 }
-
-func authStrategyVerifier(conf *Config, strategy AuthStrategy, roles []string) (authVerifier, error) {
-	switch strategy {
-	case AuthBasic:
-		if !conf.Auth.Server.Basic.Enabled {
-			return nil, fmt.Errorf("auth strategy %q requested but basic auth is not enabled", strategy)
-		}
-		return basicAuthVerifier(conf.Auth.Server.Basic.AllowedUsers), nil
-	case AuthOAuth:
-		if !conf.Auth.Server.OAuth.Enabled {
-			return nil, fmt.Errorf("auth strategy %q requested but oauth is not enabled", strategy)
-		}
-		return oauthVerifier(roles), nil
-	case AuthLocalJWT:
-		if !conf.Auth.Server.LocalJwt.Enabled {
-			return nil, fmt.Errorf("auth strategy %q requested but local jwt is not enabled", strategy)
-		}
-		return localJWTVerifier(), nil
-	default:
-		return nil, fmt.Errorf("unknown auth strategy %q", strategy)
-	}
-}
