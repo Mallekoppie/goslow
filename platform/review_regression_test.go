@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	jwt "github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -234,14 +235,14 @@ func TestLocalJWTValidationFailuresDoNotLogErrors(t *testing.T) {
 		Log.current.Store(previous)
 	})
 
-	if _, err := LocalJwt.ValidateLocalJwtToken("not-a-jwt"); err == nil {
+	authorizer := mustAuthorizer(t, AuthSettingsFromConfig(conf))
+	rule := mustRule(t, authorizer, AuthLocalJWT, nil)
+
+	if _, err := authorizer.Authorize(context.Background(), rule, BearerCredential("not-a-jwt")); err == nil {
 		t.Fatal("expected an invalid token error")
 	}
-	expired, err := LocalJwt.NewLocalJwtToken(map[string]interface{}{"exp": time.Now().Add(-time.Hour).Unix()})
-	if err != nil {
-		t.Fatalf("NewLocalJwtToken failed: %v", err)
-	}
-	if _, err := LocalJwt.ValidateLocalJwtToken(expired); err == nil {
+	expired := signLocalJWT(t, conf.Auth.Server.LocalJwt.JwtSigningKey, jwt.SigningMethodHS256, map[string]interface{}{"exp": time.Now().Add(-time.Hour).Unix()})
+	if _, err := authorizer.Authorize(context.Background(), rule, BearerCredential(expired)); err == nil {
 		t.Fatal("expected an expired token error")
 	}
 
@@ -259,6 +260,7 @@ func TestOIDCSuccessDoesNotLogLocalJWTErrors(t *testing.T) {
 	conf.Auth.Server.LocalJwt.Enabled = true
 	conf.Auth.Server.LocalJwt.JwtSigningKey = "test-signing-key"
 	conf.Auth.Server.LocalJwt.JwtSigningMethod = "HS256"
+	conf.Auth.Server.OAuth.Enabled = true
 	if err := SetPlatformConfiguration(*conf); err != nil {
 		t.Fatalf("SetPlatformConfiguration failed: %v", err)
 	}
@@ -271,20 +273,26 @@ func TestOIDCSuccessDoesNotLogLocalJWTErrors(t *testing.T) {
 		Log.current.Store(previous)
 	})
 
-	oidcSuccess := func(r *http.Request) (authResult, error) {
-		return authResult{Username: "oidc-user"}, nil
+	authorizer, err := NewAuthorizer(
+		AuthSettingsFromConfig(conf),
+		WithIDTokenVerifierFactory(func(context.Context) (IDTokenVerifier, error) {
+			return fakeClaimsVerifier{claims: map[string]interface{}{"sub": "oidc-user"}}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewAuthorizer failed: %v", err)
 	}
-	handler := anyAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}), localJWTVerifier(), oidcSuccess)
+	rule, err := authorizer.ResolveAccessRule(AuthLocalOrOIDC, nil)
+	if err != nil {
+		t.Fatalf("ResolveAccessRule failed: %v", err)
+	}
 
-	request := httptest.NewRequest(http.MethodGet, "/private", nil)
-	request.Header.Set("Authorization", "Bearer oidc-issued-token")
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-
-	if response.Code != http.StatusNoContent {
-		t.Fatalf("expected the OIDC verifier to authenticate, got %d", response.Code)
+	authorizedContext, err := authorizer.Authorize(context.Background(), rule, BearerCredential("oidc-issued-token"))
+	if err != nil {
+		t.Fatalf("expected the OIDC verifier to authenticate, got %v", err)
+	}
+	if _, ok := IdentityFromContext(authorizedContext); !ok {
+		t.Fatal("expected the authorizer to store the verified identity")
 	}
 	if buffer.Len() != 0 {
 		t.Fatalf("expected no error-level log entries, got:\n%s", buffer.String())

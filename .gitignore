@@ -28,3 +28,6 @@ example/grpc-web-server/server/server
 example/grpc-web-server/server/grpc-server
 .vscode/*
 example/boltdb/boltdb
+
+# Local scratch notes. Issues live in GitHub Issues.
+.scratch/

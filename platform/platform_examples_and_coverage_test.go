@@ -128,7 +128,7 @@ func TestJsonMarshallerReadAndWrite(t *testing.T) {
 	}
 }
 
-func TestBearerTokenAndLocalJwtMiddleware(t *testing.T) {
+func TestBearerTokenAndLocalJWTRoute(t *testing.T) {
 	setupTestPlatformState(t)
 
 	if _, ok := bearerToken(""); ok {
@@ -149,9 +149,17 @@ func TestBearerTokenAndLocalJwtMiddleware(t *testing.T) {
 		t.Fatalf("NewLocalJwtToken failed: %v", err)
 	}
 
-	handler := localJwtAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusAccepted)
-	}))
+	router, err := newRouter(Routes{{
+		Path:   "/secure",
+		Method: http.MethodGet,
+		Auth:   AuthLocalJWT,
+		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusAccepted)
+		},
+	}})
+	if err != nil {
+		t.Fatalf("newRouter failed: %v", err)
+	}
 	for _, tc := range []struct {
 		header string
 		want   int
@@ -166,7 +174,7 @@ func TestBearerTokenAndLocalJwtMiddleware(t *testing.T) {
 			req.Header.Set("Authorization", tc.header)
 		}
 		res := httptest.NewRecorder()
-		handler.ServeHTTP(res, req)
+		router.ServeHTTP(res, req)
 		if res.Code != tc.want {
 			t.Fatalf("for header %q, expected status %d, got %d", tc.header, tc.want, res.Code)
 		}
@@ -282,24 +290,6 @@ func Example_newLocalJwtToken() {
 	}
 	fmt.Println(strings.Contains(token, "."))
 	// Output: true
-}
-
-func Example_validateLocalJwtToken() {
-	cfg := createDefaultConfiguration()
-	cfg.Auth.Server.LocalJwt.Enabled = true
-	cfg.Auth.Server.LocalJwt.JwtSigningKey = "demo-key"
-	cfg.Auth.Server.LocalJwt.JwtSigningMethod = "HS256"
-	SetPlatformConfiguration(*cfg)
-	token, err := LocalJwt.NewLocalJwtToken(map[string]interface{}{"sub": "alice"})
-	if err != nil {
-		panic(err)
-	}
-	claims, err := LocalJwt.ValidateLocalJwtToken(token)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(claims["sub"])
-	// Output: alice
 }
 
 func ExampleSetupBoltDB() {

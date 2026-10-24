@@ -42,7 +42,14 @@ func NewApplicationHandler(options ApplicationServerOptions) (http.Handler, erro
 	}
 	initializeMetrics(conf)
 
-	connectHandler, err := NewConnectHandler(ConnectServerOptions{
+	// One authorizer, shared by both adapters: HTTP routes and RPC procedures
+	// resolve their rules against the same settings snapshot and provider cache.
+	authorizer, err := newAuthorizerFromConfig(conf)
+	if err != nil {
+		return nil, err
+	}
+
+	connectHandler, err := newConnectHandler(conf, ConnectServerOptions{
 		Services:              options.Services,
 		ServiceNames:          options.ServiceNames,
 		HandlerOptions:        options.HandlerOptions,
@@ -52,12 +59,12 @@ func NewApplicationHandler(options ApplicationServerOptions) (http.Handler, erro
 		TLSEnabled:            options.TLSEnabled,
 		TLSCertFileName:       options.TLSCertFileName,
 		TLSKeyFileName:        options.TLSKeyFileName,
-	})
+	}, authorizer)
 	if err != nil {
 		return nil, err
 	}
 
-	httpRouter, err := newRouter(options.Routes)
+	httpRouter, err := newRouterWithAuthorizer(conf, options.Routes, authorizer)
 	if err != nil {
 		return nil, err
 	}

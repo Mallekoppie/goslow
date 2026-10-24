@@ -6,7 +6,12 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strings"
 )
+
+// oidcDiscoveryPath is appended to the configured issuer by go-oidc when it
+// discovers a provider.
+const oidcDiscoveryPath = "/.well-known/openid-configuration"
 
 // ValidateServingConfiguration performs checks that require the process to be
 // starting a server: TLS material, listener addresses, and enabled auth
@@ -48,6 +53,9 @@ func ValidateServingConfiguration(conf *Config) error {
 		parsed, err := url.Parse(conf.Auth.Server.OAuth.IdpWellKnownURL)
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			return fmt.Errorf("auth.server.oauth.idpwellknownurl is invalid: %q", conf.Auth.Server.OAuth.IdpWellKnownURL)
+		}
+		if strings.HasSuffix(strings.TrimSuffix(parsed.Path, "/"), oidcDiscoveryPath) {
+			return fmt.Errorf("auth.server.oauth.idpwellknownurl must be the issuer base URL without %s: %q", oidcDiscoveryPath, conf.Auth.Server.OAuth.IdpWellKnownURL)
 		}
 		if conf.Auth.Server.OAuth.ClientID == "" {
 			return errors.New("auth.server.oauth.clientid is required when oauth is enabled")

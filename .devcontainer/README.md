@@ -12,6 +12,7 @@ Go 1.27 development container for the goslow platform and its example modules.
 | Named volumes for `/go/pkg/mod` and the build cache | Keeps `-race` builds fast and off the workspace bind mount. |
 | Node.js | LTS (devcontainer feature); required by Claude Code. |
 | Claude Code | latest (devcontainer feature); `claude` CLI + VS Code extension. |
+| GitHub CLI (`gh`) | Issue tracking and pull requests; auth persists in the `goslow-gh-config` volume. |
 | `post-create.sh` | Downloads modules for the root module and every example module, reports the toolchain, installs the skills plugin. |
 
 ## Opening the project
@@ -88,6 +89,21 @@ and domain docs live:
 ```text
 /mattpocock-skills:setup-matt-pocock-skills
 ```
+
+## GitHub CLI
+
+`gh` is installed from GitHub's apt repository by the `Dockerfile`. Authenticate
+once after the container is created:
+
+```bash
+gh auth login
+```
+
+Authentication is stored under `/home/vscode/.config/gh`, which is the named
+volume `goslow-gh-config`, so it survives **Dev Containers: Rebuild Container**.
+The issue tracker, pull requests, and the skills' GitHub workflows use this CLI;
+see `docs/agents/issue-tracker.md`. Work that was tracked in local markdown
+before this switch is not recreated as GitHub issues.
 
 ## Ports
 

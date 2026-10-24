@@ -28,11 +28,11 @@ func (e *echoService) Register(mux *http.ServeMux, options ...connect.HandlerOpt
 		echoProcedure,
 		func(ctx context.Context, request *connect.Request[wrapperspb.StringValue]) (*connect.Response[wrapperspb.StringValue], error) {
 			value := request.Msg.GetValue()
-			if username := UsernameFromContext(ctx); username != "" {
-				value += "|" + username
-			}
-			if claims := ClaimsFromContext(ctx); claims != nil {
-				if subject, ok := claims["sub"].(string); ok {
+			if identity, ok := IdentityFromContext(ctx); ok {
+				if identity.Username != "" {
+					value += "|" + identity.Username
+				}
+				if subject, ok := identity.Claims["sub"].(string); ok {
 					value += "|" + subject
 				}
 			}
