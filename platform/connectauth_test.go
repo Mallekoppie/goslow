@@ -189,7 +189,7 @@ func TestConnectAuthStrategyErrorMessage(t *testing.T) {
 	cfg.Auth.Server.Basic.Enabled = true
 	SetPlatformConfiguration(*cfg)
 
-	_, err := newConnectAuthInterceptor(cfg)
+	_, err := newConnectAuthInterceptorWithAuthorizer(cfg, nil)
 	if err == nil {
 		t.Fatal("expected an error for basic-only configuration")
 	}
