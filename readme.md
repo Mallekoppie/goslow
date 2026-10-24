@@ -83,6 +83,10 @@ Demonstrates how a client token is forwarded and validated across multiple servi
 - Server service validates token and then also validates the original client token
 - Server service can now do authorization based on original client token
 
+Both example routes require the `user` role. See
+`example/forwardClientToken/readme.md` for the Keycloak realm-role claim mapping
+(`realm_access.roles`) needed for a valid token to pass that requirement.
+
 ### gRPC-Compatible Service Setup (grpc-auth, grpc-web-server)
 
 The platform serves RPCs with [Buf Connect](https://connectrpc.com), not grpc-go.
@@ -109,6 +113,15 @@ its migration path here before removing this dependency.
 ### HTTP API Server
 
 Implements REST endpoints for database operations and configuration queries.
+
+`http-api-server` and `http-web-server` ship a `/secrets` route backed by Vault.
+Their `config.yml` files disable Vault because the examples do not ship the
+`client.cer`/`client.key` pair that cert auth would load. With Vault disabled,
+`/secrets` returns `500` with the body `vault not enabled`; this is the expected
+behaviour for the shipped configuration. To exercise the route, set
+`platform.vault.enabled: true` and either supply `Cert.CertFile`/`Cert.KeyFile`
+for cert auth or enable `Token` auth, pointing the address list at a running
+Vault that holds the `kv-v2/data/dev/test/creds` secret.
 
 **Route Definition Example:**
 ```go
