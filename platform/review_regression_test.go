@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	jwt "github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -234,14 +235,14 @@ func TestLocalJWTValidationFailuresDoNotLogErrors(t *testing.T) {
 		Log.current.Store(previous)
 	})
 
-	if _, err := LocalJwt.ValidateLocalJwtToken("not-a-jwt"); err == nil {
+	authorizer := mustAuthorizer(t, AuthSettingsFromConfig(conf))
+	rule := mustRule(t, authorizer, AuthLocalJWT, nil)
+
+	if _, err := authorizer.Authorize(context.Background(), rule, BearerCredential("not-a-jwt")); err == nil {
 		t.Fatal("expected an invalid token error")
 	}
-	expired, err := LocalJwt.NewLocalJwtToken(map[string]interface{}{"exp": time.Now().Add(-time.Hour).Unix()})
-	if err != nil {
-		t.Fatalf("NewLocalJwtToken failed: %v", err)
-	}
-	if _, err := LocalJwt.ValidateLocalJwtToken(expired); err == nil {
+	expired := signLocalJWT(t, conf.Auth.Server.LocalJwt.JwtSigningKey, jwt.SigningMethodHS256, map[string]interface{}{"exp": time.Now().Add(-time.Hour).Unix()})
+	if _, err := authorizer.Authorize(context.Background(), rule, BearerCredential(expired)); err == nil {
 		t.Fatal("expected an expired token error")
 	}
 

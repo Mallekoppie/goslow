@@ -19,18 +19,12 @@ type connectAuthInterceptor struct {
 	procedureRules map[string]AccessRule
 }
 
-// newConnectAuthInterceptor builds the config-driven interceptor with its own
-// authorizer. An empty strategy is only allowed when no auth mechanism is
-// enabled; otherwise startup fails closed. AuthNone is the explicit public
-// configuration.
-func newConnectAuthInterceptor(conf *Config) (connect.Interceptor, error) {
-	return newConnectAuthInterceptorWithAuthorizer(conf, nil)
-}
-
 // newConnectAuthInterceptorWithAuthorizer builds the interceptor around a
 // supplied authorizer, or one constructed from conf when none is supplied. The
 // combined application passes the same authorizer to the HTTP and RPC adapters
-// so both share one settings snapshot and provider cache.
+// so both share one settings snapshot and provider cache. An empty strategy is
+// only allowed when no auth mechanism is enabled; otherwise startup fails
+// closed. AuthNone is the explicit public configuration.
 func newConnectAuthInterceptorWithAuthorizer(conf *Config, authorizer *Authorizer) (connect.Interceptor, error) {
 	if conf == nil {
 		return nil, errors.New("nil platform configuration")

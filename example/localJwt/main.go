@@ -74,7 +74,7 @@ func HandleQuery(w http.ResponseWriter, r *http.Request) {
 	identity, ok := platform.IdentityFromContext(r.Context())
 	if !ok {
 		platform.Log.Error("No identity found in context")
-		w.Write([]byte("Query successful"))
+		http.Error(w, "No identity found in context", http.StatusUnauthorized)
 		return
 	}
 

@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"http-web-server/model"
 	"net/http"
+	"slices"
 
 	"github.com/Mallekoppie/goslow/platform"
 	"go.uber.org/zap"
 )
+
+// OAuthRequiredRole is the role the /oauth2 route demands. It is shared with
+// the route declaration so the gate and the handler cannot drift.
+const OAuthRequiredRole = "read"
 
 func HelloWorld(w http.ResponseWriter, r *http.Request) {
 	platform.Log.Info("We arrived at a new world!!!!")
@@ -120,14 +125,32 @@ func GetSecrets(w http.ResponseWriter, r *http.Request) {
 
 func GetOAuthDetails(w http.ResponseWriter, r *http.Request) {
 	identity, ok := platform.IdentityFromContext(r.Context())
-	if !ok || len(identity.Roles) == 0 {
-		http.Error(w, "No roles found for the caller", http.StatusUnauthorized)
+	if !ok {
+		http.Error(w, "No identity found for the caller", http.StatusUnauthorized)
+		return
+	}
+
+	if !slices.Contains(identity.Roles, OAuthRequiredRole) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
 	platform.Log.Info("OAuth details", zap.String("role_1", identity.Roles[0]), zap.String("username", identity.Username),
 		zap.String("idp_ref", identity.Issuer))
 
+	platform.JsonMarshaller.WriteJsonResponse(w, http.StatusOK, OAuthCallerDetails{
+		Username: identity.Username,
+		Issuer:   identity.Issuer,
+		Roles:    identity.Roles,
+	})
+}
+
+// OAuthCallerDetails describes the verified caller without exposing the raw
+// credential or the complete claims set.
+type OAuthCallerDetails struct {
+	Username string   `json:"username"`
+	Issuer   string   `json:"issuer"`
+	Roles    []string `json:"roles"`
 }
 
 type GetSecretResponse struct {

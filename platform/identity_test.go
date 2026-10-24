@@ -239,6 +239,67 @@ func TestAuthorizeLocalJWTRejectsAnInvalidSignature(t *testing.T) {
 	}
 }
 
+func TestAuthorizeLocalJWTValidatesTokensAgainstTheSettingsSnapshot(t *testing.T) {
+	settings := AuthSettings{LocalJWT: localJWTSettings()}
+	authorizer := mustAuthorizer(t, settings)
+	rule := mustRule(t, authorizer, AuthLocalJWT, nil)
+	key := settings.LocalJWT.SigningKey
+
+	testCases := []struct {
+		name      string
+		token     string
+		wantError error
+	}{
+		{
+			name:  "valid token",
+			token: signLocalJWT(t, key, jwt.SigningMethodHS256, map[string]interface{}{"sub": "alice"}),
+		},
+		{
+			name:      "expired token",
+			token:     signLocalJWT(t, key, jwt.SigningMethodHS256, map[string]interface{}{"sub": "alice", "exp": time.Now().Add(-time.Hour).Unix()}),
+			wantError: ErrAuthenticationRequired,
+		},
+		{
+			name:      "foreign signature",
+			token:     signLocalJWT(t, "a-different-key", jwt.SigningMethodHS256, map[string]interface{}{"sub": "mallory"}),
+			wantError: ErrAuthenticationRequired,
+		},
+		{
+			name:      "malformed token",
+			token:     "not-a-token",
+			wantError: ErrAuthenticationRequired,
+		},
+		{
+			name:      "rejected signing method",
+			token:     signLocalJWT(t, key, jwt.SigningMethodHS512, map[string]interface{}{"sub": "alice"}),
+			wantError: ErrAuthenticationRequired,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx, err := authorizer.Authorize(context.Background(), rule, BearerCredential(testCase.token))
+			if testCase.wantError != nil {
+				if !errors.Is(err, testCase.wantError) {
+					t.Fatalf("expected %v, got %v", testCase.wantError, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Authorize failed: %v", err)
+			}
+			identity, ok := IdentityFromContext(ctx)
+			if !ok {
+				t.Fatal("expected an identity in the returned context")
+			}
+			if identity.Claims["sub"] != "alice" {
+				t.Fatalf("expected the token claims in the identity, got %v", identity.Claims)
+			}
+		})
+	}
+}
+
 func TestAuthorizeIDTokenUsesTheInjectedVerifierFactory(t *testing.T) {
 	settings := AuthSettings{OAuth: OAuthSettings{Enabled: true, RolesClaim: "groups"}}
 	factoryCalls, verifyCalls := 0, 0
@@ -454,6 +515,28 @@ func TestAuthorizeLocalOrOIDCFallsThroughWithoutMergingIdentities(t *testing.T) 
 	}
 	if identity.Username != "bob" || identity.Issuer != "https://idp.example" {
 		t.Fatalf("expected the ID token identity, got %q / %q", identity.Username, identity.Issuer)
+	}
+}
+
+func TestAuthorizeIDTokenReportsCancellationBeforeVerification(t *testing.T) {
+	settings := AuthSettings{OAuth: OAuthSettings{Enabled: true}}
+	verifierCalls := 0
+	authorizer := mustAuthorizer(t, settings, WithIDTokenVerifierFactory(
+		func(context.Context) (IDTokenVerifier, error) {
+			verifierCalls++
+			return recordingIDTokenVerifier{claims: map[string]interface{}{"roles": []interface{}{"admin"}}}, nil
+		},
+	))
+	rule := mustRule(t, authorizer, AuthOAuth, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := authorizer.Authorize(ctx, rule, BearerCredential("token")); !errors.Is(err, ErrCancelled) {
+		t.Fatalf("expected ErrCancelled, got %v", err)
+	}
+	if verifierCalls != 0 {
+		t.Fatalf("a cancelled request must not build or call a verifier, ran %d times", verifierCalls)
 	}
 }
 

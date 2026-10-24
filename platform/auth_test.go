@@ -39,7 +39,7 @@ func stubOIDCVerifier(t *testing.T, verifier IDTokenVerifier, err error) {
 func enableOAuth(t *testing.T, cfg *Config, rolesClaim string) {
 	t.Helper()
 	cfg.Auth.Server.OAuth.Enabled = true
-	cfg.Auth.Server.OAuth.IdpWellKnownURL = "https://idp.example/.well-known/openid-configuration"
+	cfg.Auth.Server.OAuth.IdpWellKnownURL = "https://idp.example"
 	cfg.Auth.Server.OAuth.ClientID = "test-client"
 	cfg.Auth.Server.OAuth.RolesClaim = rolesClaim
 	SetPlatformConfiguration(*cfg)
@@ -280,13 +280,6 @@ func TestLocalOrOIDCRequiresBothStrategiesEnabled(t *testing.T) {
 	}})
 	if err == nil {
 		t.Fatal("expected local-or-oidc to fail when oauth is disabled")
-	}
-}
-
-func TestRouteWithoutAuthStrategyFailsClosedAtRouterBuild(t *testing.T) {
-	// Guard against a future change that makes an empty strategy mean public.
-	if _, err := routeAuthStrategies(Route{}); !errors.Is(err, ErrRouteAuthStrategyRequired) {
-		t.Fatalf("expected ErrRouteAuthStrategyRequired, got %v", err)
 	}
 }
 

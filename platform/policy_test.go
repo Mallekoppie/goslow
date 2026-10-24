@@ -4,10 +4,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
+	"github.com/spf13/viper"
 )
 
 func TestConnectRolePolicy(t *testing.T) {
@@ -50,7 +52,7 @@ func TestConnectAuthStrategyValidation(t *testing.T) {
 		cfg.Auth.Server.LocalJwt.Enabled = true
 		SetPlatformConfiguration(*cfg)
 
-		if _, err := newConnectAuthInterceptor(cfg); !errors.Is(err, ErrConnectAuthStrategyRequired) {
+		if _, err := newConnectAuthInterceptorWithAuthorizer(cfg, nil); !errors.Is(err, ErrConnectAuthStrategyRequired) {
 			t.Fatalf("expected ErrConnectAuthStrategyRequired, got %v", err)
 		}
 	})
@@ -61,7 +63,7 @@ func TestConnectAuthStrategyValidation(t *testing.T) {
 		cfg.Grpc.Server.Auth = AuthOAuth
 		SetPlatformConfiguration(*cfg)
 
-		if _, err := newConnectAuthInterceptor(cfg); err == nil {
+		if _, err := newConnectAuthInterceptorWithAuthorizer(cfg, nil); err == nil {
 			t.Fatal("expected an error for a disabled oauth strategy")
 		}
 	})
@@ -72,7 +74,7 @@ func TestConnectAuthStrategyValidation(t *testing.T) {
 		cfg.Grpc.Server.Auth = AuthBasic
 		SetPlatformConfiguration(*cfg)
 
-		if _, err := newConnectAuthInterceptor(cfg); err == nil {
+		if _, err := newConnectAuthInterceptorWithAuthorizer(cfg, nil); err == nil {
 			t.Fatal("expected basic auth to be rejected")
 		}
 	})
@@ -84,7 +86,7 @@ func TestConnectAuthStrategyValidation(t *testing.T) {
 		cfg.Auth.Server.LocalJwt.Enabled = true
 		SetPlatformConfiguration(*cfg)
 
-		interceptor, err := newConnectAuthInterceptor(cfg)
+		interceptor, err := newConnectAuthInterceptorWithAuthorizer(cfg, nil)
 		if err != nil || interceptor != nil {
 			t.Fatalf("expected no interceptor for AuthNone, got %v / %v", interceptor, err)
 		}
@@ -213,7 +215,7 @@ func TestValidateServingConfiguration(t *testing.T) {
 		}},
 		{name: "oauth without algorithms", configure: func(c *Config) {
 			c.Auth.Server.OAuth.Enabled = true
-			c.Auth.Server.OAuth.IdpWellKnownURL = "https://idp.example/.well-known/openid-configuration"
+			c.Auth.Server.OAuth.IdpWellKnownURL = "https://idp.example"
 			c.Auth.Server.OAuth.ClientID = "id"
 		}},
 		{name: "local jwt without key", configure: func(c *Config) {
@@ -239,6 +241,75 @@ func TestValidateServingConfiguration(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateServingConfigurationRejectsDiscoveryDocumentIssuer(t *testing.T) {
+	issuers := []string{
+		"https://idp.example/.well-known/openid-configuration",
+		"https://idp.example/.well-known/openid-configuration/",
+		"https://idp.example/tenant/.well-known/openid-configuration",
+	}
+
+	for _, issuer := range issuers {
+		t.Run(issuer, func(t *testing.T) {
+			cfg := validOAuthServingConfig()
+			cfg.Auth.Server.OAuth.IdpWellKnownURL = issuer
+
+			err := ValidateServingConfiguration(cfg)
+			if err == nil {
+				t.Fatalf("expected the discovery document URL %q to be rejected", issuer)
+			}
+			if !strings.Contains(err.Error(), "issuer base") {
+				t.Fatalf("expected the error to name the issuer base as the expected form, got %q", err)
+			}
+		})
+	}
+}
+
+func TestValidateServingConfigurationAcceptsIssuerBase(t *testing.T) {
+	issuers := []string{
+		"https://idp.example",
+		"https://idp.example/",
+		"https://idp.example/tenant",
+	}
+
+	for _, issuer := range issuers {
+		t.Run(issuer, func(t *testing.T) {
+			cfg := validOAuthServingConfig()
+			cfg.Auth.Server.OAuth.IdpWellKnownURL = issuer
+
+			if err := ValidateServingConfiguration(cfg); err != nil {
+				t.Fatalf("expected the issuer base URL %q to be accepted, got %v", issuer, err)
+			}
+		})
+	}
+}
+
+func TestHTTPExampleConfigurationPassesServingValidation(t *testing.T) {
+	v := viper.New()
+	v.SetConfigFile(filepath.Join("..", "example", "http-web-server", "config.yml"))
+	if err := v.ReadInConfig(); err != nil {
+		t.Fatalf("read the HTTP example configuration: %v", err)
+	}
+
+	cfg := &Config{}
+	if err := v.UnmarshalKey("platform", cfg); err != nil {
+		t.Fatalf("decode the HTTP example configuration: %v", err)
+	}
+	applyDefaults(cfg)
+
+	if err := ValidateServingConfiguration(cfg); err != nil {
+		t.Fatalf("expected the HTTP example configuration to pass serving validation, got %v", err)
+	}
+}
+
+func validOAuthServingConfig() *Config {
+	cfg := createDefaultConfiguration()
+	cfg.Auth.Server.OAuth.Enabled = true
+	cfg.Auth.Server.OAuth.IdpWellKnownURL = "https://idp.example"
+	cfg.Auth.Server.OAuth.ClientID = "test-client"
+	cfg.Auth.Server.OAuth.AllowedAlgorithms = []string{"RS256"}
+	return cfg
 }
 
 func TestOAuthInvalidEndpointReturnsError(t *testing.T) {
