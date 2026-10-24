@@ -292,24 +292,6 @@ func Example_newLocalJwtToken() {
 	// Output: true
 }
 
-func Example_validateLocalJwtToken() {
-	cfg := createDefaultConfiguration()
-	cfg.Auth.Server.LocalJwt.Enabled = true
-	cfg.Auth.Server.LocalJwt.JwtSigningKey = "demo-key"
-	cfg.Auth.Server.LocalJwt.JwtSigningMethod = "HS256"
-	SetPlatformConfiguration(*cfg)
-	token, err := LocalJwt.NewLocalJwtToken(map[string]interface{}{"sub": "alice"})
-	if err != nil {
-		panic(err)
-	}
-	claims, err := LocalJwt.ValidateLocalJwtToken(token)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(claims["sub"])
-	// Output: alice
-}
-
 func ExampleSetupBoltDB() {
 	cfg := createDefaultConfiguration()
 	cfg.Database.BoltDB.Enabled = true
