@@ -49,7 +49,8 @@ The `platform` directory provides shared infrastructure for all services in the 
 
 - Always use platform helpers for logging, config, and database access.
 - Configure all platform features in `platform/config.yml`.
-- Extend middleware with the provided helpers; inject a custom ID-token verifier with `platform.WithIDTokenVerifierFactory`.
+- Extend middleware with the provided helpers.
+- The identity module builds the ID-token verifier from the OAuth settings when a router or handler is constructed.
 - Place tests for platform features in the same directory (e.g., `boltdb_test.go`, `jwt_test.go`).
 
 ### Example
@@ -123,30 +124,35 @@ var Routes = platform.Routes{
         Method:      http.MethodPost,
         HandlerFunc: service.WriteObject,
         SlaMs:       10,
+        Auth:        platform.AuthNone,
     },
     platform.Route{
         Path:        "/db/read",
         Method:      http.MethodPost,
         HandlerFunc: service.ReadObject,
         SlaMs:       0,
+        Auth:        platform.AuthNone,
     },
     platform.Route{
         Path:        "/",
         Method:      http.MethodGet,
         HandlerFunc: service.HelloWorld,
         SlaMs:       0,
+        Auth:        platform.AuthNone,
     },
     platform.Route{
         Path:        "/config",
         Method:      http.MethodGet,
         HandlerFunc: service.GetConfiguration,
         SlaMs:       0,
+        Auth:        platform.AuthNone,
     },
     platform.Route{
         Path:        "/all",
         Method:      http.MethodGet,
         HandlerFunc: service.ReadAll,
         SlaMs:       0,
+        Auth:        platform.AuthNone,
     },
 }
 ```
@@ -392,6 +398,7 @@ these defaults:
 | `database.boltdb.enabled` | `false` |
 | `database.boltdb.opentimeoutseconds` | `5` |
 | `auth.server.oauth.rolesclaim` | `roles` |
+| `auth.server.localjwt.rolesclaim` | `roles` |
 | `http.server.allowedorigins` | empty (CORS disabled) |
 | `http.server.maxrequestbodybytes` | `1048576` |
 | `grpc.server.auth` | unset (startup error if JWT/OAuth is enabled) |

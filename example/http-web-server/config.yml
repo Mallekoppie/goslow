@@ -40,9 +40,10 @@ platform:
     server:
       oauth:
         enabled: true
-        # Replace with the well-known document of the identity provider that
-        # mints the ID tokens accepted by the /oauth2 route.
-        idpwellknownurl: "https://idp.example/.well-known/openid-configuration"
+        # Issuer base URL of the identity provider that mints the ID tokens
+        # accepted by the /oauth2 route. The platform appends
+        # /.well-known/openid-configuration; do not include it here.
+        idpwellknownurl: "https://idp.example"
         clientid: "example-client"
         allowedalgorithms:
         - rs256
