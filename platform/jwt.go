@@ -9,7 +9,6 @@ import (
 )
 
 var (
-	ErrLocalJwtInvalidToken               = errors.New("local JWT token is invalid")
 	ErrLocalJwtNotEnabled                 = errors.New("local JWT authentication is not enabled in the configuration")
 	ErrLocalJwtSigningKeyNotConfigured    = errors.New("JWT signing key is not configured")
 	ErrLocalJwtSigningMethodNotConfigured = errors.New("JWT signing method is not configured or invalid")
@@ -92,53 +91,4 @@ func (l localJwtOrganizer) NewLocalJwtToken(claims map[string]interface{}) (stri
 		return "", err
 	}
 	return signedToken, nil
-}
-
-func (l localJwtOrganizer) ValidateLocalJwtToken(tokenString string) (map[string]interface{}, error) {
-	signingMethod, key, err := localJwtConfigChecks()
-	if err != nil {
-		if Log != nil {
-			Log.Error("Local JWT checks failed for Validation", zap.Error(err))
-		}
-		return nil, err
-	}
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) { return key, nil }, jwt.WithValidMethods([]string{signingMethod.Alg()}))
-	if err != nil {
-		if errors.Is(err, jwt.ErrTokenExpired) {
-			if Log != nil {
-				Log.Debug("JWT token has expired", zap.Error(err))
-			}
-			return nil, jwt.ErrTokenExpired
-		}
-		if errors.Is(err, jwt.ErrSignatureInvalid) {
-			if Log != nil {
-				Log.Debug("JWT token signature is invalid for this verifier")
-			}
-			return nil, jwt.ErrSignatureInvalid
-		}
-		if Log != nil {
-			Log.Debug("Unable to parse local JWT token", zap.Error(err))
-		}
-		return nil, err
-	}
-	if !token.Valid {
-		if Log != nil {
-			Log.Debug("Invalid JWT token", zap.String("token", redactToken(tokenString)))
-		}
-		return nil, ErrLocalJwtInvalidToken
-	}
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		if Log != nil {
-			Log.Debug("Token claims are not of type jwt.MapClaims", zap.String("token", redactToken(tokenString)))
-		}
-		return nil, ErrLocalJwtInvalidToken
-	}
-	if len(claims) == 0 {
-		if Log != nil {
-			Log.Debug("Token claims are empty", zap.String("token", redactToken(tokenString)))
-		}
-		return nil, ErrLocalJwtInvalidToken
-	}
-	return claims, nil
 }

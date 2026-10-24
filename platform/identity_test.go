@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -235,6 +236,67 @@ func TestAuthorizeLocalJWTRejectsAnInvalidSignature(t *testing.T) {
 	token := signLocalJWT(t, "a-different-key", jwt.SigningMethodHS256, map[string]interface{}{"sub": "mallory"})
 	if _, err := authorizer.Authorize(context.Background(), rule, BearerCredential(token)); !errors.Is(err, ErrAuthenticationRequired) {
 		t.Fatalf("expected ErrAuthenticationRequired, got %v", err)
+	}
+}
+
+func TestAuthorizeLocalJWTValidatesTokensAgainstTheSettingsSnapshot(t *testing.T) {
+	settings := AuthSettings{LocalJWT: localJWTSettings()}
+	authorizer := mustAuthorizer(t, settings)
+	rule := mustRule(t, authorizer, AuthLocalJWT, nil)
+	key := settings.LocalJWT.SigningKey
+
+	testCases := []struct {
+		name      string
+		token     string
+		wantError error
+	}{
+		{
+			name:  "valid token",
+			token: signLocalJWT(t, key, jwt.SigningMethodHS256, map[string]interface{}{"sub": "alice"}),
+		},
+		{
+			name:      "expired token",
+			token:     signLocalJWT(t, key, jwt.SigningMethodHS256, map[string]interface{}{"sub": "alice", "exp": time.Now().Add(-time.Hour).Unix()}),
+			wantError: ErrAuthenticationRequired,
+		},
+		{
+			name:      "foreign signature",
+			token:     signLocalJWT(t, "a-different-key", jwt.SigningMethodHS256, map[string]interface{}{"sub": "mallory"}),
+			wantError: ErrAuthenticationRequired,
+		},
+		{
+			name:      "malformed token",
+			token:     "not-a-token",
+			wantError: ErrAuthenticationRequired,
+		},
+		{
+			name:      "rejected signing method",
+			token:     signLocalJWT(t, key, jwt.SigningMethodHS512, map[string]interface{}{"sub": "alice"}),
+			wantError: ErrAuthenticationRequired,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx, err := authorizer.Authorize(context.Background(), rule, BearerCredential(testCase.token))
+			if testCase.wantError != nil {
+				if !errors.Is(err, testCase.wantError) {
+					t.Fatalf("expected %v, got %v", testCase.wantError, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Authorize failed: %v", err)
+			}
+			identity, ok := IdentityFromContext(ctx)
+			if !ok {
+				t.Fatal("expected an identity in the returned context")
+			}
+			if identity.Claims["sub"] != "alice" {
+				t.Fatalf("expected the token claims in the identity, got %v", identity.Claims)
+			}
+		})
 	}
 }
 
