@@ -64,7 +64,7 @@ type ConnectServerOptions struct {
 // github.com/improbable-eng/grpc-web wrapper for gRPC-Web translation. Before
 // removing this dependency, document the replacement upstream fix and the
 // migration path.
-func buildConnectHandlerOptions(conf *Config, options ConnectServerOptions) ([]connect.HandlerOption, error) {
+func buildConnectHandlerOptions(conf *Config, options ConnectServerOptions, authorizer *Authorizer) ([]connect.HandlerOption, error) {
 	interceptors := make([]connect.Interceptor, 0, len(options.Interceptors)+4)
 	// Outermost first: recovery, request id, access logging, then auth, then
 	// consumer interceptors. Auth failures are therefore logged, and panics are
@@ -72,7 +72,7 @@ func buildConnectHandlerOptions(conf *Config, options ConnectServerOptions) ([]c
 	interceptors = append(interceptors, newConnectDefaultInterceptors(conf)...)
 
 	if !options.DisableAuthFromConfig {
-		authInterceptor, err := newConnectAuthInterceptor(conf)
+		authInterceptor, err := newConnectAuthInterceptorWithAuthorizer(conf, authorizer)
 		if err != nil {
 			return nil, err
 		}
@@ -108,11 +108,19 @@ func NewConnectHandler(options ConnectServerOptions) (http.Handler, error) {
 	}
 	initializeMetrics(conf)
 
+	return newConnectHandler(conf, options, nil)
+}
+
+// newConnectHandler builds the RPC handler against an explicit configuration
+// and authorizer. A nil authorizer makes the auth interceptor construct one
+// when authentication is enabled; the combined application passes the
+// authorizer it shares with the HTTP adapter.
+func newConnectHandler(conf *Config, options ConnectServerOptions, authorizer *Authorizer) (http.Handler, error) {
 	if (conf.Grpc.Server.HealthEnabled || conf.Grpc.Server.ReflectionEnabled) && len(options.ServiceNames) == 0 {
 		return nil, errors.New("grpc health/reflection require ConnectServerOptions.ServiceNames (fully qualified service names such as wdid.v1.AuthService)")
 	}
 
-	handlerOptions, err := buildConnectHandlerOptions(conf, options)
+	handlerOptions, err := buildConnectHandlerOptions(conf, options, authorizer)
 	if err != nil {
 		return nil, err
 	}

@@ -20,22 +20,29 @@ import (
 const httpShutdownTimeout = 10 * time.Second
 
 func newRouter(serviceRoutes Routes) (*mux.Router, error) {
-	router := mux.NewRouter().StrictSlash(true)
-
 	conf, err := GetPlatformConfiguration()
 	if err != nil {
 		return nil, err
 	}
 
-	// Request ID runs first so the recovery handler can report it.
-	router.Use(requestIDMiddleware, recoveryMiddleware)
-
-	matcher, err := publicPaths(conf)
+	authorizer, err := newAuthorizerFromConfig(conf)
 	if err != nil {
 		return nil, err
 	}
 
-	authorizer, err := newAuthorizerFromConfig(conf)
+	return newRouterWithAuthorizer(conf, serviceRoutes, authorizer)
+}
+
+// newRouterWithAuthorizer builds the HTTP router around a supplied authorizer.
+// The combined application passes the authorizer it shares with the RPC
+// adapter, so both transports read one settings snapshot and provider cache.
+func newRouterWithAuthorizer(conf *Config, serviceRoutes Routes, authorizer *Authorizer) (*mux.Router, error) {
+	router := mux.NewRouter().StrictSlash(true)
+
+	// Request ID runs first so the recovery handler can report it.
+	router.Use(requestIDMiddleware, recoveryMiddleware)
+
+	matcher, err := publicPaths(conf)
 	if err != nil {
 		return nil, err
 	}

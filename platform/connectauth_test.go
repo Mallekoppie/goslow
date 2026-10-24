@@ -118,8 +118,8 @@ func TestConnectAuthUsesOAuthWhenLocalJWTDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected the OAuth token to be accepted: %v", err)
 	}
-	if value != "hi|alice" {
-		t.Fatalf("expected the preferred username in context, got %q", value)
+	if value != "hi|alice|user-1" {
+		t.Fatalf("expected the verified identity in context, got %q", value)
 	}
 }
 
