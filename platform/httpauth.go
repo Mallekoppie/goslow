@@ -27,6 +27,10 @@ func newAuthorizerFromConfig(conf *Config) (*Authorizer, error) {
 	))
 }
 
+// statusClientClosedRequest is the conventional non-standard status for a
+// request whose caller went away before a response was produced.
+const statusClientClosedRequest = 499
+
 // authorizeHTTPRoute enforces one resolved access rule for an HTTP route.
 func authorizeHTTPRoute(next http.Handler, authorizer *Authorizer, rule AccessRule) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +42,11 @@ func authorizeHTTPRoute(next http.Handler, authorizer *Authorizer, rule AccessRu
 
 		authorizedContext, err := authorizer.Authorize(r.Context(), rule, credentialFromHTTPRequest(r))
 		if err != nil {
-			recordAuthDecision("http", "denied")
+			if AuthorizationOutcome(err) == AuthOutcomeCancelled {
+				recordAuthDecision("http", "cancelled")
+			} else {
+				recordAuthDecision("http", "denied")
+			}
 			writeHTTPAuthorizationError(w, err)
 			return
 		}
@@ -67,6 +75,8 @@ func credentialFromHTTPRequest(r *http.Request) Credential {
 // authentication-required.
 func writeHTTPAuthorizationError(w http.ResponseWriter, err error) {
 	switch AuthorizationOutcome(err) {
+	case AuthOutcomeCancelled:
+		http.Error(w, "Client Closed Request", statusClientClosedRequest)
 	case AuthOutcomeForbidden:
 		http.Error(w, "Forbidden", http.StatusForbidden)
 	case AuthOutcomeUnavailable:

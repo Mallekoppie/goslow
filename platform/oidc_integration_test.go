@@ -239,7 +239,7 @@ func TestAuthorizerReportsUnreachableProvider(t *testing.T) {
 	cfg := setupTestPlatformState(t)
 
 	cfg.Auth.Server.OAuth.Enabled = true
-	cfg.Auth.Server.OAuth.IdpWellKnownURL = "http://127.0.0.1:1/.well-known/openid-configuration"
+	cfg.Auth.Server.OAuth.IdpWellKnownURL = "http://127.0.0.1:1"
 	cfg.Auth.Server.OAuth.ClientID = "test-client"
 	SetPlatformConfiguration(*cfg)
 

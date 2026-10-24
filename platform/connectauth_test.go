@@ -128,7 +128,7 @@ func TestConnectAuthReportsIdentityProviderOutage(t *testing.T) {
 
 	cfg := createDefaultConfiguration()
 	cfg.Auth.Server.OAuth.Enabled = true
-	cfg.Auth.Server.OAuth.IdpWellKnownURL = "http://127.0.0.1:1/.well-known/openid-configuration"
+	cfg.Auth.Server.OAuth.IdpWellKnownURL = "http://127.0.0.1:1"
 	cfg.Auth.Server.OAuth.ClientID = "test-client"
 	cfg.Grpc.Server.Auth = AuthOAuth
 	SetPlatformConfiguration(*cfg)
@@ -179,6 +179,13 @@ func TestConnectAuthDisabledAllowsAnonymousCalls(t *testing.T) {
 	}
 	if value != "hi" {
 		t.Fatalf("unexpected response %q", value)
+	}
+}
+
+func TestConnectAuthorizationErrorMapsCancellationDistinctly(t *testing.T) {
+	cancelled := fmt.Errorf("%w: %w", ErrCancelled, context.Canceled)
+	if got := connect.CodeOf(connectAuthorizationError(cancelled)); got != connect.CodeCanceled {
+		t.Fatalf("expected CodeCanceled for a cancelled request, got %v", got)
 	}
 }
 

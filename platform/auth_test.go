@@ -39,7 +39,7 @@ func stubOIDCVerifier(t *testing.T, verifier IDTokenVerifier, err error) {
 func enableOAuth(t *testing.T, cfg *Config, rolesClaim string) {
 	t.Helper()
 	cfg.Auth.Server.OAuth.Enabled = true
-	cfg.Auth.Server.OAuth.IdpWellKnownURL = "https://idp.example/.well-known/openid-configuration"
+	cfg.Auth.Server.OAuth.IdpWellKnownURL = "https://idp.example"
 	cfg.Auth.Server.OAuth.ClientID = "test-client"
 	cfg.Auth.Server.OAuth.RolesClaim = rolesClaim
 	SetPlatformConfiguration(*cfg)

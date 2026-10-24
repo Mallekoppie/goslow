@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
@@ -18,6 +19,27 @@ type idTokenVerifierFunc func(context.Context, string) (map[string]interface{}, 
 
 func (f idTokenVerifierFunc) Verify(ctx context.Context, rawToken string) (map[string]interface{}, error) {
 	return f(ctx, rawToken)
+}
+
+// newHTTPRouteAuthHandler builds the route authorization handler the router
+// installs, without the surrounding timeout and logging middleware, so tests
+// can observe cancellation handling directly.
+func newHTTPRouteAuthHandler(t *testing.T, strategy AuthStrategy, roles []string, next http.Handler) http.Handler {
+	t.Helper()
+
+	conf, err := GetPlatformConfiguration()
+	if err != nil {
+		t.Fatalf("GetPlatformConfiguration failed: %v", err)
+	}
+	authorizer, err := newAuthorizerFromConfig(conf)
+	if err != nil {
+		t.Fatalf("newAuthorizerFromConfig failed: %v", err)
+	}
+	rule, err := authorizer.ResolveAccessRule(strategy, roles)
+	if err != nil {
+		t.Fatalf("ResolveAccessRule failed: %v", err)
+	}
+	return authorizeHTTPRoute(next, authorizer, rule)
 }
 
 func TestHTTPLocalJWTRouteAuthorizesThroughTheIdentityAuthorizer(t *testing.T) {
@@ -473,6 +495,81 @@ func TestHTTPAuthFailuresAreAccessLogged(t *testing.T) {
 	}
 	if strings.Contains(logged, token) {
 		t.Fatal("access logging must not record the bearer token")
+	}
+}
+
+func TestHTTPOAuthRouteReportsCancellationBeforeVerification(t *testing.T) {
+	cfg := setupTestPlatformState(t)
+	enableOAuth(t, cfg, "roles")
+	stubOIDCVerifier(t, nil, context.Canceled)
+
+	handlerRan := false
+	handler := newHTTPRouteAuthHandler(t, AuthOAuth, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerRan = true
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	request := httptest.NewRequest(http.MethodGet, "/secure", nil).WithContext(ctx)
+	request.Header.Set("Authorization", "Bearer token-value")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != 499 {
+		t.Fatalf("expected a cancelled request to be reported as 499, got %d", response.Code)
+	}
+	if handlerRan {
+		t.Fatal("the handler must not run for a cancelled request")
+	}
+}
+
+func TestHTTPOAuthRouteReportsCancellationDuringKeyFetch(t *testing.T) {
+	cfg := setupTestPlatformState(t)
+	enableOAuth(t, cfg, "roles")
+
+	started := make(chan struct{})
+	stubOIDCVerifier(t, idTokenVerifierFunc(func(ctx context.Context, _ string) (map[string]interface{}, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}), nil)
+
+	handlerRan := false
+	handler := newHTTPRouteAuthHandler(t, AuthOAuth, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerRan = true
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest(http.MethodGet, "/secure", nil).WithContext(ctx)
+	request.Header.Set("Authorization", "Bearer token-value")
+	response := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(response, request)
+		close(done)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("token verification did not start")
+	}
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancellation did not stop verification")
+	}
+
+	if response.Code != 499 {
+		t.Fatalf("expected a cancelled request to be reported as 499, got %d", response.Code)
+	}
+	if handlerRan {
+		t.Fatal("the handler must not run for a cancelled request")
 	}
 }
 

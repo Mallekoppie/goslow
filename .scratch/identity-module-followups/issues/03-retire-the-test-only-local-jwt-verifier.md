@@ -4,9 +4,23 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The organizer-level local-JWT validation method is deleted and no production or example code references it.
-- [ ] Tests formerly covering it assert the same outcomes through the authorizer: valid token, expired token, foreign signature, malformed token, and rejected signing method.
-- [ ] Local JWT minting used by login handlers is unchanged.
-- [ ] `go build ./...`, `go vet ./...`, `gofmt -l .`, and the full test suite pass.
+- [x] The organizer-level local-JWT validation method is deleted and no production or example code references it.
+- [x] Tests formerly covering it assert the same outcomes through the authorizer: valid token, expired token, foreign signature, malformed token, and rejected signing method.
+- [x] Local JWT minting used by login handlers is unchanged.
+- [x] `go build ./...`, `go vet ./...`, `gofmt -l .`, and the full test suite pass.
+
+## Comments
+
+Resolved by merging `ticket/03-retire-local-jwt-verifier` (source commit `01ac0da`) into `identity-module-followups` as merge commit `0c512269c10f8fe81186a22c3165d72c055154e2`. No conflicts.
+
+Verification run from the merge commit:
+
+- `go build ./...` - pass (exit 0)
+- `go vet ./...` - pass (exit 0)
+- `gofmt -l .` - pass (no files listed)
+- `go test ./...` - pass (`platform` ok, 1.930s; examples have no test files)
+- `go test -race ./...` - pass (`platform` ok, 3.239s)
+
+Additionally confirmed no remaining references to `ValidateLocalJwtToken` or `ErrLocalJwtInvalidToken`, and `NewLocalJwtToken` minting remains in use.

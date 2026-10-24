@@ -4,9 +4,15 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Serving configuration validation rejects a value that already contains the discovery-document path, with an error naming the issuer base as the expected form.
-- [ ] A valid issuer base URL remains accepted and the other OAuth validations are unchanged.
-- [ ] Tests cover both the rejected and accepted forms.
-- [ ] The HTTP example's checked-in configuration passes validation.
+- [x] Serving configuration validation rejects a value that already contains the discovery-document path, with an error naming the issuer base as the expected form.
+- [x] A valid issuer base URL remains accepted and the other OAuth validations are unchanged.
+- [x] Tests cover both the rejected and accepted forms.
+- [x] The HTTP example's checked-in configuration passes validation.
+
+## Comments
+
+- Source commit: `974495f` (branch `ticket/05-reject-discovery-issuer-urls`, tip `5cd0ec7`).
+- Merge commit: `587fdb3` (`Merge ticket 05: reject discovery-document issuer URLs`).
+- Verification performed from `/workspaces/goslow` after the merge: `go build ./...` (pass), `go vet ./...` (pass), `gofmt -l .` (no output), `go test ./...` (pass, `platform` 1.967s), `go test -race ./...` (pass, `platform` 3.438s). Merge completed with no conflicts.

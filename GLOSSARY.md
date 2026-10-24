@@ -73,3 +73,7 @@ _Avoid_: unauthorized, not allowed
 **Unavailable**:
 The identity provider could not be reached and no credential was definitely rejected. Mapped to `503 Service Unavailable` with `Retry-After` on HTTP and `CodeUnavailable` on RPC.
 _Avoid_: error, outage
+
+**Cancelled**:
+The request context ended before verification could establish or reject an identity. It is not a rejection, a role denial, or a provider outage. Adapters report it distinctly (`499` on HTTP, `CodeCanceled` on RPC) and metrics count it separately from denials.
+_Avoid_: unauthorized, denied, timeout
