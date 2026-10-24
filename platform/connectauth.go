@@ -140,11 +140,11 @@ func (i *connectAuthInterceptor) authorize(ctx context.Context, procedure string
 
 	authorizedContext, err := i.authorizer.Authorize(ctx, rule, credentialFromHeader(header))
 	if err != nil {
-		if errors.Is(err, ErrCancelled) {
+		if AuthorizationOutcome(err) == AuthOutcomeCancelled {
 			recordAuthDecision(rpcTransport(header), "cancelled")
-			return ctx, connectAuthorizationError(err)
+		} else {
+			recordAuthDecision(rpcTransport(header), "denied")
 		}
-		recordAuthDecision(rpcTransport(header), "denied")
 		return ctx, connectAuthorizationError(err)
 	}
 
@@ -162,16 +162,16 @@ func credentialFromHeader(header http.Header) Credential {
 	return Credential{}
 }
 
-// connectAuthorizationError maps the authorizer's failure categories onto RPC
-// codes. A verified caller lacking a role is forbidden; an unavailable identity
-// provider is retryable; everything else requires authentication.
+// connectAuthorizationError maps the authorizer's transport-neutral outcome
+// onto RPC codes. A verified caller lacking a role is forbidden; an unavailable
+// identity provider is retryable; everything else requires authentication.
 func connectAuthorizationError(err error) error {
-	switch {
-	case errors.Is(err, ErrCancelled):
+	switch AuthorizationOutcome(err) {
+	case AuthOutcomeCancelled:
 		return connect.NewError(connect.CodeCanceled, errors.New("request cancelled"))
-	case errors.Is(err, ErrForbidden):
+	case AuthOutcomeForbidden:
 		return connect.NewError(connect.CodePermissionDenied, errors.New("forbidden"))
-	case errors.Is(err, ErrUnavailable):
+	case AuthOutcomeUnavailable:
 		return connect.NewError(connect.CodeUnavailable, errors.New("identity provider unavailable"))
 	default:
 		return connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))

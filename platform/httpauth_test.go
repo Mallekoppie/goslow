@@ -272,8 +272,8 @@ func TestHTTPOAuthRouteReportsAnIdentityProviderOutage(t *testing.T) {
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503 when the identity provider is unavailable, got %d", response.Code)
 	}
-	if response.Header().Get("Retry-After") == "" {
-		t.Fatal("expected a Retry-After header on the 503 response")
+	if got := response.Header().Get("Retry-After"); got != "10" {
+		t.Fatalf("expected a Retry-After header of 10 on the 503 response, got %q", got)
 	}
 	if handlerRan {
 		t.Fatal("the handler must not run during an identity provider outage")
@@ -351,7 +351,7 @@ func TestHTTPPublicRoutePerformsNoCredentialWork(t *testing.T) {
 	verifierCalls := 0
 	original := newOIDCClaimsVerifier
 	t.Cleanup(func() { newOIDCClaimsVerifier = original })
-	newOIDCClaimsVerifier = func(context.Context, *Config, idTokenAudiencePolicy) (IDTokenVerifier, error) {
+	newOIDCClaimsVerifier = func(context.Context, OAuthSettings, idTokenAudiencePolicy) (IDTokenVerifier, error) {
 		verifierCalls++
 		return idTokenVerifierFunc(func(context.Context, string) (map[string]interface{}, error) {
 			t.Fatal("a public route must not verify credentials")
@@ -628,7 +628,7 @@ func TestHTTPOAuthRouteReportsAnOutageWhenProviderKeysCannotBeFetched(t *testing
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503 when signing keys cannot be fetched, got %d", response.Code)
 	}
-	if response.Header().Get("Retry-After") == "" {
-		t.Fatal("expected a Retry-After header on the 503 response")
+	if got := response.Header().Get("Retry-After"); got != "10" {
+		t.Fatalf("expected a Retry-After header of 10 on the 503 response, got %q", got)
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"slices"
+	"strconv"
 )
 
 // newAuthorizerFromConfig snapshots the auth settings and builds the ID token
@@ -12,10 +12,10 @@ import (
 // authorization attempt so discovery happens on the request path and can report
 // an outage instead of failing startup.
 func newAuthorizerFromConfig(conf *Config) (*Authorizer, error) {
-	verifierConfig := oauthOnlyConfigSnapshot(conf)
-	return NewAuthorizer(AuthSettingsFromConfig(conf), WithIDTokenVerifierFactory(
+	settings := AuthSettingsFromConfig(conf)
+	return NewAuthorizer(settings, WithIDTokenVerifierFactory(
 		func(ctx context.Context) (IDTokenVerifier, error) {
-			verifier, err := newOIDCClaimsVerifier(ctx, verifierConfig, requireConfiguredClientID)
+			verifier, err := newOIDCClaimsVerifier(ctx, settings.OAuth, requireConfiguredClientID)
 			if err != nil {
 				return nil, err
 			}
@@ -25,19 +25,6 @@ func newAuthorizerFromConfig(conf *Config) (*Authorizer, error) {
 			return verifier, nil
 		},
 	))
-}
-
-// oauthOnlyConfigSnapshot captures only what the OIDC verifier reads, so a
-// later configuration change cannot affect a built router.
-func oauthOnlyConfigSnapshot(conf *Config) *Config {
-	if conf == nil {
-		return nil
-	}
-
-	snapshot := &Config{}
-	snapshot.Auth.Server.OAuth = conf.Auth.Server.OAuth
-	snapshot.Auth.Server.OAuth.AllowedAlgorithms = slices.Clone(conf.Auth.Server.OAuth.AllowedAlgorithms)
-	return snapshot
 }
 
 // statusClientClosedRequest is the conventional non-standard status for a
@@ -55,12 +42,11 @@ func authorizeHTTPRoute(next http.Handler, authorizer *Authorizer, rule AccessRu
 
 		authorizedContext, err := authorizer.Authorize(r.Context(), rule, credentialFromHTTPRequest(r))
 		if err != nil {
-			if errors.Is(err, ErrCancelled) {
+			if AuthorizationOutcome(err) == AuthOutcomeCancelled {
 				recordAuthDecision("http", "cancelled")
-				writeHTTPAuthorizationError(w, err)
-				return
+			} else {
+				recordAuthDecision("http", "denied")
 			}
-			recordAuthDecision("http", "denied")
 			writeHTTPAuthorizationError(w, err)
 			return
 		}
@@ -83,17 +69,18 @@ func credentialFromHTTPRequest(r *http.Request) Credential {
 	return Credential{}
 }
 
-// writeHTTPAuthorizationError maps the authorizer's failure categories onto
-// status codes. A verified caller lacking a role is forbidden; an unavailable
-// identity provider is retryable; everything else is authentication-required.
+// writeHTTPAuthorizationError maps the authorizer's transport-neutral outcome
+// onto status codes. A verified caller lacking a role is forbidden; an
+// unavailable identity provider is retryable; everything else is
+// authentication-required.
 func writeHTTPAuthorizationError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, ErrCancelled):
+	switch AuthorizationOutcome(err) {
+	case AuthOutcomeCancelled:
 		http.Error(w, "Client Closed Request", statusClientClosedRequest)
-	case errors.Is(err, ErrForbidden):
+	case AuthOutcomeForbidden:
 		http.Error(w, "Forbidden", http.StatusForbidden)
-	case errors.Is(err, ErrUnavailable):
-		w.Header().Set("Retry-After", "10")
+	case AuthOutcomeUnavailable:
+		w.Header().Set("Retry-After", strconv.Itoa(UnavailableRetryAfterSeconds))
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 	default:
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
