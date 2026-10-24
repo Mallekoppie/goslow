@@ -23,6 +23,10 @@ var (
 	ErrForbidden = errors.New("forbidden")
 	// ErrUnavailable reports that the identity provider could not be reached.
 	ErrUnavailable = errors.New("identity provider unavailable")
+	// ErrCancelled reports that the request context ended while a credential
+	// was being verified. It is not a rejection of the credential, nor an
+	// identity-provider outage.
+	ErrCancelled = errors.New("request cancelled")
 	// ErrCredentialNotApplicable lets a verifier decline a credential meant for
 	// another strategy. It is never returned by Authorize.
 	ErrCredentialNotApplicable = errors.New("credential not applicable")
@@ -260,8 +264,14 @@ func (a *Authorizer) authorizeFirstFullyAuthorized(ctx context.Context, rule Acc
 	var sawDefiniteRejection, sawUnavailable, sawRoleDenial bool
 
 	for _, strategy := range []AuthStrategy{AuthLocalJWT, AuthOAuth} {
+		if cancelled := cancellationError(ctx, nil); cancelled != nil {
+			return ctx, cancelled
+		}
+
 		identity, err := a.verify(ctx, strategy, credential)
 		switch {
+		case errors.Is(err, ErrCancelled):
+			return ctx, err
 		case errors.Is(err, ErrCredentialNotApplicable):
 			continue
 		case errors.Is(err, ErrUnavailable):
@@ -342,6 +352,9 @@ func (a *Authorizer) verifyIDToken(ctx context.Context, credential Credential) (
 	if credential.kind != credentialBearer || credential.bearerToken == "" {
 		return Identity{}, ErrCredentialNotApplicable
 	}
+	if cancelled := cancellationError(ctx, nil); cancelled != nil {
+		return Identity{}, cancelled
+	}
 	if a.verifierFactory == nil {
 		// NewAuthorizer rejects this configuration, so it is unreachable for a
 		// constructed authorizer.
@@ -350,6 +363,9 @@ func (a *Authorizer) verifyIDToken(ctx context.Context, credential Credential) (
 
 	verifier, err := a.verifierFactory(ctx)
 	if err != nil {
+		if cancelled := cancellationError(ctx, err); cancelled != nil {
+			return Identity{}, cancelled
+		}
 		if errors.Is(err, ErrCredentialNotApplicable) {
 			return Identity{}, ErrCredentialNotApplicable
 		}
@@ -358,6 +374,9 @@ func (a *Authorizer) verifyIDToken(ctx context.Context, credential Credential) (
 
 	claims, err := verifier.Verify(ctx, credential.bearerToken)
 	if err != nil {
+		if cancelled := cancellationError(ctx, err); cancelled != nil {
+			return Identity{}, cancelled
+		}
 		if errors.Is(err, ErrCredentialNotApplicable) {
 			return Identity{}, ErrCredentialNotApplicable
 		}
@@ -372,6 +391,20 @@ func (a *Authorizer) verifyIDToken(ctx context.Context, credential Credential) (
 
 	roles, _ := rolesFromClaim(claims, a.settings.OAuth.RolesClaim)
 	return identityFromClaims(claims, roles, credential.bearerToken), nil
+}
+
+// cancellationError classifies an ended request context as ErrCancelled. It
+// consults the context first, because a verifier that returns a rejected
+// credential after the caller has gone away did not actually reject anything.
+// The context error is retained so callers can still match it directly.
+func cancellationError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("%w: %w", ErrCancelled, ctxErr)
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %w", ErrCancelled, err)
+	}
+	return nil
 }
 
 func identityFromClaims(claims map[string]interface{}, roles []string, rawToken string) Identity {

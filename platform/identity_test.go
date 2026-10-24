@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -453,6 +454,48 @@ func TestAuthorizeLocalOrOIDCFallsThroughWithoutMergingIdentities(t *testing.T) 
 	}
 	if identity.Username != "bob" || identity.Issuer != "https://idp.example" {
 		t.Fatalf("expected the ID token identity, got %q / %q", identity.Username, identity.Issuer)
+	}
+}
+
+func TestAuthorizeLocalOrOIDCReportsCancellationDuringVerification(t *testing.T) {
+	settings := AuthSettings{
+		LocalJWT: localJWTSettings(),
+		OAuth:    OAuthSettings{Enabled: true, RolesClaim: "roles"},
+	}
+
+	started := make(chan struct{})
+	authorizer := mustAuthorizer(t, settings, WithIDTokenVerifierFactory(
+		func(context.Context) (IDTokenVerifier, error) {
+			return idTokenVerifierFunc(func(ctx context.Context, _ string) (map[string]interface{}, error) {
+				close(started)
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}), nil
+		},
+	))
+	rule := mustRule(t, authorizer, AuthLocalOrOIDC, []string{"admin"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := authorizer.Authorize(ctx, rule, BearerCredential("opaque-token"))
+		result <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("token verification did not start")
+	}
+	cancel()
+
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrCancelled) {
+			t.Fatalf("expected ErrCancelled, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancellation did not stop verification")
 	}
 }
 

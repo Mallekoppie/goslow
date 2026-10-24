@@ -182,6 +182,13 @@ func TestConnectAuthDisabledAllowsAnonymousCalls(t *testing.T) {
 	}
 }
 
+func TestConnectAuthorizationErrorMapsCancellationDistinctly(t *testing.T) {
+	cancelled := fmt.Errorf("%w: %w", ErrCancelled, context.Canceled)
+	if got := connect.CodeOf(connectAuthorizationError(cancelled)); got != connect.CodeCanceled {
+		t.Fatalf("expected CodeCanceled for a cancelled request, got %v", got)
+	}
+}
+
 func TestConnectAuthStrategyErrorMessage(t *testing.T) {
 	resetPlatformState(t)
 
