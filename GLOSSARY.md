@@ -5,7 +5,7 @@ A runtime for hosting HTTP routes, Connect/gRPC surfaces, embedded web assets, a
 ## Callers
 
 **Identity**:
-The caller a request has been proven to be, with the roles and claims attached to that proof.
+The caller a request has been proven to be, with the roles and claims attached to that proof. One authorizer resolves it per request, and handlers read it through the single `IdentityFromContext` accessor.
 _Avoid_: user, principal, subject
 
 **Credential**:
@@ -31,7 +31,7 @@ The named rule a protected surface declares for how callers may authenticate: `n
 _Avoid_: auth mode, auth type, auth provider
 
 **Required roles**:
-The roles a protected surface demands; a caller holding any one of them passes the gate. A caller without one is forbidden, not unauthenticated.
+The roles a protected surface demands; a caller holding any one of them passes the gate. A caller without one is forbidden, not unauthenticated: `403` on HTTP and `CodePermissionDenied` on RPC.
 _Avoid_: allowed roles, permissions, scopes
 
 **Unauthenticated exclusion list**:
@@ -59,3 +59,17 @@ _Avoid_: role field, groups claim
 **Identity provider**:
 The external OIDC issuer that mints ID tokens. Its unavailability is reported as unavailable, never as a rejected credential.
 _Avoid_: auth server, auth service
+
+## Auth outcomes
+
+**Authentication required**:
+No usable credential was presented, or the configured strategy definitely rejected it. Mapped to `401 Unauthorized` on HTTP and `CodeUnauthenticated` on RPC.
+_Avoid_: unauthorized, unauthenticated error
+
+**Forbidden**:
+A verified caller that holds none of the required roles. Mapped to `403 Forbidden` on HTTP and `CodePermissionDenied` on RPC.
+_Avoid_: unauthorized, not allowed
+
+**Unavailable**:
+The identity provider could not be reached and no credential was definitely rejected. Mapped to `503 Service Unavailable` with `Retry-After` on HTTP and `CodeUnavailable` on RPC.
+_Avoid_: error, outage

@@ -10,9 +10,10 @@ HTTP routes and Connect/gRPC procedures authenticated through two parallel paths
 
 ## Consequences
 
-- A verified caller lacking a required role is forbidden (403 / `CodePermissionDenied`) on both transports, not unauthenticated.
+- One auth implementation, the identity module, owns authentication and authorization on both transports. The former verifier chain, any/all middleware, hard-coded claim extraction, test-only middleware wrappers, five identity accessors, and their context keys are deleted.
+- Failure categories map the same way everywhere: a missing or invalid credential is `401` / `CodeUnauthenticated`; a verified caller lacking a required role is `403` / `CodePermissionDenied`; an identity-provider outage with no definite rejection is `503` with `Retry-After` / `CodeUnavailable`.
 - `local-or-oidc` takes the first fully authorized credential; identities from several verifiers are no longer merged.
 - `RolesRequired` applies to local JWTs, and declaring roles on a `none` or `basic` rule fails at construction.
 - Auth settings are frozen when a router or handler is built; changing them requires a new authorizer.
-- The five individual identity context accessors are replaced by `IdentityFromContext`; `RequestIDFromContext` stays.
+- The five individual identity context accessors are replaced by `IdentityFromContext`; `RequestIDFromContext` stays and works on public and authenticated requests.
 - `OAuth.ValidateClientToken` shares the same verifier implementation and gains an explicit audience policy.

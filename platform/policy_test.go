@@ -1,7 +1,6 @@
 package platform
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -288,29 +287,5 @@ func TestConnectStreamTimeoutIsConfigurable(t *testing.T) {
 	interceptor := newConnectTimeoutInterceptor(conf).(connectTimeoutInterceptor)
 	if interceptor.streamTimeout <= 0 {
 		t.Fatal("expected the configured stream timeout")
-	}
-}
-
-func TestRoleExtractionFromLocalClaims(t *testing.T) {
-	claims := map[string]interface{}{"roles": []interface{}{"admin", "user"}}
-	roles := rolesFromClaims(claims)
-	if len(roles) != 2 || roles[0] != "admin" {
-		t.Fatalf("unexpected roles: %v", roles)
-	}
-
-	roles = rolesFromClaims(map[string]interface{}{"role": "single"})
-	if len(roles) != 1 || roles[0] != "single" {
-		t.Fatalf("unexpected single role: %v", roles)
-	}
-}
-
-func TestEchoClientContextUsesAccessors(t *testing.T) {
-	// Guards against regressing to string context keys.
-	ctx := context.WithValue(context.Background(), contextOAuthRoles, []string{"admin"})
-	if got := RolesFromContext(ctx); len(got) != 1 || got[0] != "admin" {
-		t.Fatalf("unexpected roles: %v", got)
-	}
-	if RequestIDFromContext(ctx) != "" {
-		t.Fatal("expected no request id")
 	}
 }

@@ -13,62 +13,16 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type contextKey string
 
 const (
-	contextOAuthRoles             contextKey = "oauth.roles"
-	contextOAuthClientToken       contextKey = "oauth.client.token"
-	contextOAuthPreferredUsername contextKey = "oauth.preferred.username"
-	contextOAuthIssuer            contextKey = "oauth.issuer"
-	contextLocalJwtClaims         contextKey = "localjwt.claims"
-	contextRequestID              contextKey = "request.id"
+	contextRequestID contextKey = "request.id"
 
 	// RequestIDHeader is the request correlation header.
 	RequestIDHeader = "X-Request-ID"
 )
-
-// RolesFromContext returns the roles granted by the auth verifier.
-func RolesFromContext(ctx context.Context) []string {
-	if roles, ok := ctx.Value(contextOAuthRoles).([]string); ok {
-		return roles
-	}
-	return nil
-}
-
-// ClientTokenFromContext returns the raw OAuth client token. Never log it.
-func ClientTokenFromContext(ctx context.Context) string {
-	if token, ok := ctx.Value(contextOAuthClientToken).(string); ok {
-		return token
-	}
-	return ""
-}
-
-// UsernameFromContext returns the authenticated username when supplied.
-func UsernameFromContext(ctx context.Context) string {
-	if username, ok := ctx.Value(contextOAuthPreferredUsername).(string); ok {
-		return username
-	}
-	return ""
-}
-
-// IssuerFromContext returns the OAuth issuer.
-func IssuerFromContext(ctx context.Context) string {
-	if issuer, ok := ctx.Value(contextOAuthIssuer).(string); ok {
-		return issuer
-	}
-	return ""
-}
-
-// ClaimsFromContext returns local JWT claims.
-func ClaimsFromContext(ctx context.Context) map[string]interface{} {
-	if claims, ok := ctx.Value(contextLocalJwtClaims).(map[string]interface{}); ok {
-		return claims
-	}
-	return nil
-}
 
 // RequestIDFromContext returns the request correlation id.
 func RequestIDFromContext(ctx context.Context) string {
@@ -193,158 +147,6 @@ func bearerToken(headerValue string) (string, bool) {
 	return token, true
 }
 
-var (
-	ErrAuthRequired    = errors.New("authentication required")
-	errOIDCUnavailable = errors.New("oidc provider unavailable")
-)
-
-// authResult carries everything an auth strategy extracted from the request.
-type authResult struct {
-	Roles       []string
-	Token       string
-	Issuer      string
-	Username    string
-	LocalClaims map[string]interface{}
-}
-
-// authVerifier authenticates a request or returns an error.
-type authVerifier func(*http.Request) (authResult, error)
-
-func mergeAuthResults(results ...authResult) authResult {
-	merged := authResult{}
-	for _, result := range results {
-		if len(result.Roles) > 0 {
-			merged.Roles = append(merged.Roles, result.Roles...)
-		}
-		if result.Token != "" {
-			merged.Token = result.Token
-		}
-		if result.Issuer != "" {
-			merged.Issuer = result.Issuer
-		}
-		if result.Username != "" {
-			merged.Username = result.Username
-		}
-		if len(result.LocalClaims) > 0 {
-			merged.LocalClaims = result.LocalClaims
-		}
-	}
-	return merged
-}
-
-func applyAuthResult(ctx context.Context, result authResult) context.Context {
-	if len(result.Roles) > 0 {
-		ctx = context.WithValue(ctx, contextOAuthRoles, result.Roles)
-	}
-	if result.Token != "" {
-		ctx = context.WithValue(ctx, contextOAuthClientToken, result.Token)
-	}
-	if result.Issuer != "" {
-		ctx = context.WithValue(ctx, contextOAuthIssuer, result.Issuer)
-	}
-	if result.Username != "" {
-		ctx = context.WithValue(ctx, contextOAuthPreferredUsername, result.Username)
-	}
-	if len(result.LocalClaims) > 0 {
-		ctx = context.WithValue(ctx, contextLocalJwtClaims, result.LocalClaims)
-	}
-	return ctx
-}
-
-func writeAuthError(w http.ResponseWriter, err error) {
-	if errors.Is(err, errOIDCUnavailable) {
-		w.Header().Set("Retry-After", "10")
-		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	http.Error(w, "Unauthorized", http.StatusUnauthorized)
-}
-
-// anyAuthMiddleware succeeds when at least one verifier accepts the request.
-func anyAuthMiddleware(inner http.Handler, verifiers ...authVerifier) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if len(verifiers) == 0 {
-			inner.ServeHTTP(w, r)
-			return
-		}
-
-		results := make([]authResult, 0, len(verifiers))
-		var lastErr error
-		for _, verifier := range verifiers {
-			result, err := verifier(r)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			results = append(results, result)
-		}
-
-		if len(results) == 0 {
-			recordAuthDecision("http", "denied")
-			writeAuthError(w, lastErr)
-			return
-		}
-
-		ctx := applyAuthResult(r.Context(), mergeAuthResults(results...))
-		inner.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-// allAuthMiddleware requires every verifier to accept the request.
-func allAuthMiddleware(inner http.Handler, verifiers ...authVerifier) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		results := make([]authResult, 0, len(verifiers))
-		for _, verifier := range verifiers {
-			result, err := verifier(r)
-			if err != nil {
-				recordAuthDecision("http", "denied")
-				writeAuthError(w, err)
-				return
-			}
-			results = append(results, result)
-		}
-
-		ctx := applyAuthResult(r.Context(), mergeAuthResults(results...))
-		inner.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-func basicAuthVerifier(users map[string]string) authVerifier {
-	return func(r *http.Request) (authResult, error) {
-		username, password, ok := r.BasicAuth()
-		if !ok {
-			return authResult{}, ErrAuthRequired
-		}
-
-		allowedPassword, found := users[username]
-		if !found || len(allowedPassword) < 1 {
-			return authResult{}, ErrAuthRequired
-		}
-
-		if err := bcrypt.CompareHashAndPassword([]byte(allowedPassword), []byte(password)); err != nil {
-			return authResult{}, ErrAuthRequired
-		}
-
-		return authResult{Username: username}, nil
-	}
-}
-
-func localJWTVerifier() authVerifier {
-	return func(r *http.Request) (authResult, error) {
-		token, ok := bearerToken(r.Header.Get("Authorization"))
-		if !ok {
-			return authResult{}, ErrAuthRequired
-		}
-
-		claims, err := LocalJwt.ValidateLocalJwtToken(token)
-		if err != nil {
-			return authResult{}, err
-		}
-
-		return authResult{Token: token, LocalClaims: claims}, nil
-	}
-}
-
 // idTokenAudiencePolicy states whether an ID token must be issued to this
 // service's configured client.
 type idTokenAudiencePolicy uint8
@@ -463,79 +265,6 @@ func normalizeAlgorithms(algorithms []string) []string {
 	return normalized
 }
 
-// extractRoles reads roles from the configured claim. The literal claim path is
-// tried first (Zitadel-style URNs), then as a dotted path. Values may be a list
-// of strings or an object whose keys are the roles.
-func extractRoles(claims map[string]interface{}, claimPath string) []string {
-	roles, _ := rolesFromClaim(claims, claimPath)
-	return roles
-}
-
-func oauthVerifier(roles []string) authVerifier {
-	return func(r *http.Request) (authResult, error) {
-		token, ok := bearerToken(r.Header.Get("Authorization"))
-		if !ok {
-			return authResult{}, ErrAuthRequired
-		}
-
-		conf, err := GetPlatformConfiguration()
-		if err != nil || conf == nil {
-			return authResult{}, errOIDCUnavailable
-		}
-
-		verifierFactory := newOIDCClaimsVerifier
-		verifier, err := verifierFactory(r.Context(), conf, requireConfiguredClientID)
-		if err != nil {
-			if Log != nil {
-				Log.Error("Error communicating with IDP provider", zap.Error(err), zap.String("provider_url", conf.Auth.Server.OAuth.IdpWellKnownURL))
-			}
-			return authResult{}, fmt.Errorf("%w: %v", errOIDCUnavailable, err)
-		}
-
-		claims, err := verifier.Verify(r.Context(), token)
-		if err != nil {
-			if Log != nil {
-				Log.Error("Token verification failed", zap.Error(err))
-			}
-			return authResult{}, ErrAuthRequired
-		}
-
-		grantedRoles := extractRoles(claims, conf.Auth.Server.OAuth.RolesClaim)
-		if len(roles) > 0 {
-			matched := make([]string, 0, len(roles))
-			for _, required := range roles {
-				for _, granted := range grantedRoles {
-					if required == granted {
-						matched = append(matched, required)
-						break
-					}
-				}
-			}
-			if len(matched) == 0 {
-				if Log != nil {
-					Log.Error("Required role not found", zap.Strings("roles", roles), zap.Strings("allowedRoles", grantedRoles), zap.String("path", r.URL.EscapedPath()), zap.String("method", r.Method))
-				}
-				return authResult{}, ErrAuthRequired
-			}
-			grantedRoles = matched
-		}
-
-		result := authResult{Roles: grantedRoles, Token: token}
-		if issuer, ok := claims["iss"].(string); ok {
-			result.Issuer = issuer
-		}
-		if username, ok := claims["preferred_username"].(string); ok {
-			result.Username = username
-		}
-
-		return result, nil
-	}
-}
-
-func oAuth2Middleware(inner http.Handler, roles []string) http.Handler {
-	return allAuthMiddleware(inner, oauthVerifier(roles))
-}
-
 func allowedContentTypeMiddleware(inner http.Handler, contentTypeConfig string) http.Handler {
 	contentType := strings.ToLower(contentTypeConfig)
 	enabled := len(contentTypeConfig) > 0
@@ -554,12 +283,4 @@ func allowedContentTypeMiddleware(inner http.Handler, contentTypeConfig string) 
 			inner.ServeHTTP(w, r)
 		}
 	})
-}
-
-func basicAuthMiddleware(inner http.Handler, users map[string]string) http.Handler {
-	return allAuthMiddleware(inner, basicAuthVerifier(users))
-}
-
-func localJwtAuthMiddleware(next http.Handler) http.Handler {
-	return allAuthMiddleware(next, localJWTVerifier())
 }

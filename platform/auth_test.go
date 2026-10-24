@@ -45,7 +45,7 @@ func enableOAuth(t *testing.T, cfg *Config, rolesClaim string) {
 	SetPlatformConfiguration(*cfg)
 }
 
-func TestExtractRoles(t *testing.T) {
+func TestRolesFromClaim(t *testing.T) {
 	testCases := []struct {
 		name      string
 		claims    map[string]interface{}
@@ -98,75 +98,11 @@ func TestExtractRoles(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			got := extractRoles(testCase.claims, testCase.claimPath)
+			got, _ := rolesFromClaim(testCase.claims, testCase.claimPath)
 			if !reflect.DeepEqual(got, testCase.want) {
 				t.Fatalf("expected %v, got %v", testCase.want, got)
 			}
 		})
-	}
-}
-
-func TestAllAuthMiddlewareRequiresEveryVerifier(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
-
-	allow := func(*http.Request) (authResult, error) { return authResult{}, nil }
-	deny := func(*http.Request) (authResult, error) { return authResult{}, ErrAuthRequired }
-
-	req := httptest.NewRequest(http.MethodGet, "/secure", nil)
-
-	res := httptest.NewRecorder()
-	allAuthMiddleware(handler, allow, allow).ServeHTTP(res, req)
-	if res.Code != http.StatusNoContent {
-		t.Fatalf("expected 204 when every verifier passes, got %d", res.Code)
-	}
-
-	res = httptest.NewRecorder()
-	allAuthMiddleware(handler, allow, deny).ServeHTTP(res, req)
-	if res.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 when one verifier fails, got %d", res.Code)
-	}
-}
-
-func TestAnyAuthMiddlewareAcceptsOneVerifier(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
-
-	deny := func(*http.Request) (authResult, error) { return authResult{}, ErrAuthRequired }
-	allow := func(*http.Request) (authResult, error) { return authResult{Username: "alice"}, nil }
-
-	res := httptest.NewRecorder()
-	anyAuthMiddleware(handler, deny, allow).ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/secure", nil))
-	if res.Code != http.StatusNoContent {
-		t.Fatalf("expected 204 when one verifier passes, got %d", res.Code)
-	}
-
-	res = httptest.NewRecorder()
-	anyAuthMiddleware(handler, deny, deny).ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/secure", nil))
-	if res.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 when every verifier fails, got %d", res.Code)
-	}
-}
-
-func TestAnyAuthMiddlewareReportsIDPOutage(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("handler must not run when the identity provider is unavailable")
-	})
-
-	unavailable := func(*http.Request) (authResult, error) {
-		return authResult{}, errOIDCUnavailable
-	}
-
-	res := httptest.NewRecorder()
-	anyAuthMiddleware(handler, unavailable).ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/secure", nil))
-
-	if res.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503 when the IdP is unavailable, got %d", res.Code)
-	}
-	if res.Header().Get("Retry-After") == "" {
-		t.Fatal("expected a Retry-After header on the 503 response")
 	}
 }
 
@@ -442,6 +378,42 @@ func TestRecoveryMiddlewareReturnsJSON500WithRequestID(t *testing.T) {
 	}
 	if body["request_id"] != requestID {
 		t.Fatalf("expected body request_id %q, got %q", requestID, body["request_id"])
+	}
+}
+
+func TestRequestIDIsAvailableOnAuthenticatedRequests(t *testing.T) {
+	setupTestPlatformState(t)
+
+	token, err := LocalJwt.NewLocalJwtToken(map[string]interface{}{"sub": "alice"})
+	if err != nil {
+		t.Fatalf("NewLocalJwtToken failed: %v", err)
+	}
+
+	var seen string
+	router, err := newRouter(Routes{{
+		Path:   "/secure",
+		Method: http.MethodGet,
+		Auth:   AuthLocalJWT,
+		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
+			seen = RequestIDFromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		},
+	}})
+	if err != nil {
+		t.Fatalf("newRouter failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/secure", nil)
+	req.Header.Set(RequestIDHeader, "authenticated-request-id")
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected the authenticated request to succeed, got %d", res.Code)
+	}
+	if seen != "authenticated-request-id" {
+		t.Fatalf("expected the request id in the authenticated context, got %q", seen)
 	}
 }
 

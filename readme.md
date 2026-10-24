@@ -27,10 +27,15 @@ The `platform` directory provides shared infrastructure for all services in the 
 - **HTTP Client (`httpclient.go`)**  
   Creates HTTP clients with custom config (TLS, timeouts) from `config.yml`.
 
-- **Authentication (`jwt.go`, `oauth.go`, `middleware.go`)**  
-  - Local JWT: Issue and validate tokens for stateless auth.
-  - OAuth2: Token management, auto-renewal, and validation (with Vault integration for secrets).
-  - Middleware: HTTP middleware and Connect interceptors for OAuth2 and JWT authentication.
+- **Authentication (`identity.go`, `httpauth.go`, `connectauth.go`, `jwt.go`, `oauth.go`)**  
+  One transport-neutral identity module authorizes every surface. Adapters extract a
+  `Credential` from headers, resolve an `AccessRule` once at construction, and call
+  `Authorizer.Authorize`; handlers read the caller with `IdentityFromContext`.  
+  - Local JWT: Issue tokens for stateless auth; verification happens inside the authorizer.
+  - OAuth2: Token management, auto-renewal, and client-token validation (Vault integration for secrets).
+  - Failure mapping: missing or invalid credentials are `401` / `CodeUnauthenticated`;
+    a verified caller lacking a required role is `403` / `CodePermissionDenied`; an
+    identity-provider outage is `503` with `Retry-After` / `CodeUnavailable`.
 
 - **Vault Integration (`vault.go`)**  
   HashiCorp Vault client for secret management.  
@@ -38,13 +43,13 @@ The `platform` directory provides shared infrastructure for all services in the 
 
 - **Utilities**
   - **JSON Marshalling (`marshalling.go`)**: Read/write JSON for HTTP APIs.
-  - **Middleware (`middleware.go`)**: Logging, CORS, content-type, and authentication for HTTP routes.
+  - **Middleware (`middleware.go`)**: Request ID, recovery, logging, and content-type checks for HTTP routes. Authentication is not middleware; it is the identity module above.
 
 ### Usage Patterns
 
 - Always use platform helpers for logging, config, and database access.
 - Configure all platform features in `platform/config.yml`.
-- Extend authentication and middleware via provided interfaces.
+- Extend middleware with the provided helpers; inject a custom ID-token verifier with `platform.WithIDTokenVerifierFactory`.
 - Place tests for platform features in the same directory (e.g., `boltdb_test.go`, `jwt_test.go`).
 
 ### Example
@@ -424,13 +429,34 @@ An explicit `Route.Auth` is mandatory: a route without one fails router
 construction. Use `Auth: platform.AuthNone` for a deliberately public route.
 A route that requests a disabled strategy also fails at startup.
 
+HTTP routes and Connect procedures share one `Authorizer` and one settings
+snapshot (the combined application builds it once). Handlers never read auth
+state from individual context keys: they call `platform.IdentityFromContext`:
+
+```go
+identity, ok := platform.IdentityFromContext(r.Context())
+if !ok {
+    // public route or a programming error in a protected route
+}
+```
+
+Protection failures map consistently on every transport:
+
+| Outcome | HTTP | Connect / gRPC |
+| --- | --- | --- |
+| Missing or invalid credential | `401 Unauthorized` | `CodeUnauthenticated` |
+| Verified caller lacking a required role | `403 Forbidden` | `CodePermissionDenied` |
+| Identity provider unavailable, no definite rejection | `503` + `Retry-After` | `CodeUnavailable` |
+
 An OAuth route with no `RolesRequired` only verifies the token. If the identity provider
 cannot be reached at request time the route returns `503 Service Unavailable` with a
 `Retry-After` header instead of panicking, and other routes keep serving.
 
-Roles are read from `auth.server.oauth.rolesclaim`. The literal claim key is tried first
-(handy for Zitadel URNs), then a dotted path such as `realm_access.roles`. The claim may
-be a list of strings or an object whose keys are the roles.
+OAuth roles are read from `auth.server.oauth.rolesclaim`; local JWT roles from
+`auth.server.localjwt.rolesclaim`, falling back to the singular `role` claim when the
+configured claim is absent. The literal claim key is tried first (handy for Zitadel
+URNs), then a dotted path such as `realm_access.roles`. The claim may be a list of
+strings or an object whose keys are the roles.
 
 ### Unauthenticated Exclusion List
 
@@ -597,7 +623,8 @@ if conf.Database.BoltDB.Enabled {
 Every router built by the platform includes:
 
 - **Request ID** – reuses an incoming `X-Request-ID` or generates one, returns it on the
-  response, and stores it in the request context (`platform.ContextRequestID`).
+  response, and stores it in the request context (`platform.RequestIDFromContext`). It is
+  populated for public and authenticated requests on both HTTP and RPC surfaces.
 - **Recovery** – converts a handler panic into a JSON `500` that carries the request id.
 - **Access logging** – logs method, path, status, duration, and request id; SLA breaches
   are logged as warnings.

@@ -177,28 +177,3 @@ func connectAuthorizationError(err error) error {
 		return connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
 	}
 }
-
-// rolesFromClaims extracts roles from local JWT claims.
-func rolesFromClaims(claims map[string]interface{}) []string {
-	if len(claims) == 0 {
-		return nil
-	}
-
-	switch typed := claims["roles"].(type) {
-	case []string:
-		return typed
-	case []interface{}:
-		roles := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if role, ok := item.(string); ok {
-				roles = append(roles, role)
-			}
-		}
-		return roles
-	}
-
-	if role, ok := claims["role"].(string); ok {
-		return []string{role}
-	}
-	return nil
-}
