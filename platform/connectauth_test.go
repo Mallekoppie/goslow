@@ -128,7 +128,7 @@ func TestConnectAuthReportsIdentityProviderOutage(t *testing.T) {
 
 	cfg := createDefaultConfiguration()
 	cfg.Auth.Server.OAuth.Enabled = true
-	cfg.Auth.Server.OAuth.IdpWellKnownURL = "http://127.0.0.1:1/.well-known/openid-configuration"
+	cfg.Auth.Server.OAuth.IdpWellKnownURL = "http://127.0.0.1:1"
 	cfg.Auth.Server.OAuth.ClientID = "test-client"
 	cfg.Grpc.Server.Auth = AuthOAuth
 	SetPlatformConfiguration(*cfg)
