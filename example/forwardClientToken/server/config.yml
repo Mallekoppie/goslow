@@ -30,6 +30,10 @@ platform:
         allowedalgorithms:
         - rs256
         - rs384
+        # Keycloak puts realm roles under realm_access.roles. The routes in this
+        # example require the "user" role. Read it from that dotted path (or
+        # configure a Keycloak mapper that emits a top-level roles claim).
+        rolesclaim: realm_access.roles
       # Basic Auth adds 75 - 80 ms to the response time - queue sad face :(
       # Passwords must be hashed using bcrypt. Unencrypted passwords will not work
       basic:
@@ -58,8 +62,12 @@ platform:
     boltdb:
       enabled: true
       filename: ./database.db
+  # Vault is disabled because this example does not ship the client
+  # certificate/key pair that cert auth would load, and the server does not read
+  # secrets from Vault. Enable it and supply CertFile/KeyFile (cert auth) or
+  # token settings if you add Vault-backed configuration.
   vault:
-    enabled: true
+    enabled: false
     addresslist:
       - 'https://localhost:8200'
     InsecureSkipVerify: true
@@ -74,9 +82,9 @@ platform:
       TokenPath: ''
       token: ""
     Cert:
-      enabled: true
-      CertFile: './client.cer'
-      KeyFile: './client.key'
+      enabled: false
+      CertFile: ''
+      KeyFile: ''
 
 
 componentconfigexample:

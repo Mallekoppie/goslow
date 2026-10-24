@@ -23,3 +23,38 @@ The server's own route token must be issued to its configured client ID
 client (`federate-token-client`), so `ValidateClientToken` verifies its
 signature, expiry, and issuer but deliberately skips the audience check.
 Requiring the server's client ID there would reject every forwarded token.
+
+# Required roles and Keycloak realm roles
+Both routes require the `user` role (`RolesRequired: []string{"user"}`), so a
+token that verifies without that role returns `403 Forbidden`.
+
+Keycloak puts realm roles under `realm_access.roles` by default:
+
+```json
+"realm_access": {
+  "roles": ["offline_access", "uma_authorization", "user"]
+}
+```
+
+Both `client/config.yml` and `server/config.yml` therefore set:
+
+```yaml
+platform:
+  auth:
+    server:
+      oauth:
+        rolesclaim: realm_access.roles
+```
+
+For a valid token to pass the role gate:
+
+- Assign the `user` realm role to the user (directly or through a group) in the
+  realm that issues the token.
+- Keep `rolesclaim: realm_access.roles` for Keycloak realm roles. For client
+  roles use `resource_access.<client-id>.roles`, or add a Keycloak protocol
+  mapper that emits a top-level `roles` claim and set `rolesclaim: roles`.
+- `rolesclaim` is matched as a literal claim key first, then as a dotted path,
+  and accepts either a list of strings or an object whose keys are the roles.
+
+Without a matching claim the verified caller holds no roles, which is a
+`403 Forbidden` rather than an authentication failure.

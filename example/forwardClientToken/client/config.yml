@@ -30,6 +30,10 @@ platform:
         allowedalgorithms:
           - rs256
           - rs384
+        # Keycloak puts realm roles under realm_access.roles. The routes in this
+        # example require the "user" role. Read it from that dotted path (or
+        # configure a Keycloak mapper that emits a top-level roles claim).
+        rolesclaim: realm_access.roles
       # Basic Auth adds 75 - 80 ms to the response time - queue sad face :(
       # Passwords must be hashed using bcrypt. Unencrypted passwords will not work
       basic:
@@ -76,8 +80,8 @@ platform:
       token: "s.aRADbzy3XXaH6dEj3hvHC3BN"
     Cert:
       enabled: false
-      CertFile: './client.cer'
-      KeyFile: './client.key'
+      CertFile: ''
+      KeyFile: ''
 
 
 componentconfigexample:
