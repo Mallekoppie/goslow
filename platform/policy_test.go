@@ -50,7 +50,7 @@ func TestConnectAuthStrategyValidation(t *testing.T) {
 		cfg.Auth.Server.LocalJwt.Enabled = true
 		SetPlatformConfiguration(*cfg)
 
-		if _, err := newConnectAuthInterceptor(cfg); !errors.Is(err, ErrConnectAuthStrategyRequired) {
+		if _, err := newConnectAuthInterceptorWithAuthorizer(cfg, nil); !errors.Is(err, ErrConnectAuthStrategyRequired) {
 			t.Fatalf("expected ErrConnectAuthStrategyRequired, got %v", err)
 		}
 	})
@@ -61,7 +61,7 @@ func TestConnectAuthStrategyValidation(t *testing.T) {
 		cfg.Grpc.Server.Auth = AuthOAuth
 		SetPlatformConfiguration(*cfg)
 
-		if _, err := newConnectAuthInterceptor(cfg); err == nil {
+		if _, err := newConnectAuthInterceptorWithAuthorizer(cfg, nil); err == nil {
 			t.Fatal("expected an error for a disabled oauth strategy")
 		}
 	})
@@ -72,7 +72,7 @@ func TestConnectAuthStrategyValidation(t *testing.T) {
 		cfg.Grpc.Server.Auth = AuthBasic
 		SetPlatformConfiguration(*cfg)
 
-		if _, err := newConnectAuthInterceptor(cfg); err == nil {
+		if _, err := newConnectAuthInterceptorWithAuthorizer(cfg, nil); err == nil {
 			t.Fatal("expected basic auth to be rejected")
 		}
 	})
@@ -84,7 +84,7 @@ func TestConnectAuthStrategyValidation(t *testing.T) {
 		cfg.Auth.Server.LocalJwt.Enabled = true
 		SetPlatformConfiguration(*cfg)
 
-		interceptor, err := newConnectAuthInterceptor(cfg)
+		interceptor, err := newConnectAuthInterceptorWithAuthorizer(cfg, nil)
 		if err != nil || interceptor != nil {
 			t.Fatalf("expected no interceptor for AuthNone, got %v / %v", interceptor, err)
 		}
